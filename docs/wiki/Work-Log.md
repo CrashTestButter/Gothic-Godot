@@ -2,6 +2,12 @@
 
 Newest first.
 
+## 2026-11-07 - Eating and drinking
+
+- Food and potions (ITEM_KAT_FOOD, ITEM_KAT_POTIONS from the scripts) held at the mouth for 0.3 s (XR) or U while holding them (desktop) are used up: the item's on_state[0] function runs with self = the hero and item = the item, like Gothic-Unity's AI_UseItem. Npc_ChangeAttribute keeps HP and mana between 0 and their max (Gothic-Unity's rule).
+- Hit points on the inside of the left wrist (XR) or top left (desktop).
+- `--grab-test=use`: after the bag test the hero is hurt to 10 HP, a healing potion (ITFO_POTION_HEALTH_01) comes out of the bag into the hand and is drunk: 10 -> 40 HP.
+
 ## 2026-11-07 - The bag: put items away, take them out
 
 ![The hero's bag in front of the eyes](images/bag-open.png)

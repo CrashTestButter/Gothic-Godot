@@ -607,6 +607,55 @@ namespace GothicGodot.Spike
             $"body {npc.Body}, head {npc.Head}, armour {(npc.ArmorInstance > 0 ? _vm.GetSymbolByIndex(npc.ArmorInstance)?.Name : "none")} " +
             $"({GetArmorMdm(npc.ArmorInstance) ?? "naked"})";
 
+        /// <summary>
+        /// The hero uses an item (eats, drinks): its on_state[0] function runs with self = the hero, item = the item,
+        /// like Gothic-Unity's AI_UseItem. Returns false for items without a use function.
+        /// </summary>
+        public bool UseItem(string instance)
+        {
+            var symbol = _vm.GetSymbolByName(instance);
+            if (symbol is not { Type: DaedalusDataType.Instance } || _hero?.Instance == null)
+                return false;
+            var item = _vm.InitInstance<ItemInstance>(symbol);
+            var use = item?.GetOnState(ItemStateSlot.Slot0) ?? 0;
+            if (use <= 0)
+                return false;
+
+            var self = _vm.GlobalSelf;
+            var oldItem = _vm.GlobalItem;
+            _vm.GlobalSelf = _hero.Instance;
+            _vm.GlobalItem = item;
+            try
+            {
+                _vm.Call(use);
+                return true;
+            }
+            catch (Exception e)
+            {
+                GD.PushWarning($"[Ai] use function of {instance} failed: {e.Message}");
+                return false;
+            }
+            finally
+            {
+                _vm.GlobalSelf = self;
+                _vm.GlobalItem = oldItem;
+            }
+        }
+
+        /// <summary>Food and potions: what the hero eats or drinks at his mouth (ITEM_KAT_FOOD, ITEM_KAT_POTIONS).</summary>
+        public bool IsConsumable(string instance)
+        {
+            var symbol = _vm.GetSymbolByName(instance);
+            if (symbol is not { Type: DaedalusDataType.Instance })
+                return false;
+            _consumableFlags ??= (_vm.GetSymbolByName("ITEM_KAT_FOOD")?.GetInt(0, null) ?? 0) |
+                                 (_vm.GetSymbolByName("ITEM_KAT_POTIONS")?.GetInt(0, null) ?? 0);
+            var item = _vm.InitInstance<ItemInstance>(symbol);
+            return item != null && (item.MainFlag & _consumableFlags.Value) != 0;
+        }
+
+        private int? _consumableFlags;
+
         public bool HasClip(string name) => _factory.GetClip(name.ToUpperInvariant()) != null;
 
         public bool PlayClip(GothicNpc npc, string name, bool isLooping)
@@ -803,6 +852,22 @@ namespace GothicGodot.Spike
                 if (_npcBySymbol.TryGetValue(instance, out var npc))
                     return npc.Instance;
                 return _hero?.Instance;
+            }));
+            // Attributes live in the NpcInstance; HP and mana stay between 0 and their max (Gothic-Unity's rule).
+            _vm.RegisterExternal("Npc_ChangeAttribute", (DaedalusVm.ExternalFuncV<NpcInstance, int, int>)((npc, attribute, value) =>
+            {
+                _externals++;
+                if (npc == null || attribute < 0 || attribute > (int)NpcAttribute.RegenerateMana)
+                    return;
+                var newValue = npc.GetAttribute((NpcAttribute)attribute) + value;
+                if (attribute is (int)NpcAttribute.HitPoints or (int)NpcAttribute.Mana)
+                {
+                    var max = npc.GetAttribute((NpcAttribute)(attribute + 1));
+                    if (max > 0)
+                        newValue = Math.Clamp(newValue, 0, max);
+                }
+
+                npc.SetAttribute((NpcAttribute)attribute, newValue);
             }));
             // Inventories (Gothic-Unity's VmExternalDomain signatures): scripts fill them on insert and in dialogs.
             _vm.RegisterExternal("CreateInvItem", (DaedalusVm.ExternalFuncV<NpcInstance, int>)((npc, item) =>

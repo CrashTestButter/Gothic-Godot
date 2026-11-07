@@ -600,12 +600,23 @@ namespace GothicGodot.Spike
                 bag.IsAllowed = () => _ai?.Dialog?.IsActive != true;
             }
 
+            GothicGodot.Interaction.MouthUse mouth = null;
+            if (_ai != null && bag != null)
+            {
+                mouth = new GothicGodot.Interaction.MouthUse { Name = "Mouth" };
+                AddChild(mouth);
+                mouth.Init(player, _ai.IsConsumable, _ai.UseItem, bag.GetName, () => _ai.HeroInstance);
+            }
+
             var grabTest = _args.Get("grab-test", "");
-            if (grabTest == "true" || grabTest == "bag")
+            if (grabTest is "true" or "bag" or "use")
             {
                 var test = new GothicGodot.Interaction.GrabTest { Name = "GrabTest" };
                 AddChild(test);
-                test.Init(player, itemRoot, _args.Screenshot, grabTest == "bag" ? bag : null);
+                test.Init(player, itemRoot, _args.Screenshot, grabTest is "bag" or "use" ? bag : null,
+                    grabTest == "use" ? mouth : null, () => _ai?.HeroInstance);
+                if (_ai != null)
+                    test.SetConsumable(_ai.IsConsumable);
             }
 
             if (_ai?.Dialog != null)

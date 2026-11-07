@@ -1,3 +1,4 @@
+using System;
 using System.Linq;
 using Godot;
 using GothicGodot.Player;
@@ -8,7 +9,8 @@ namespace GothicGodot.Interaction
     /// Scripted grab test without a headset (--grab-test): the desktop player walks up to the nearest item, takes it
     /// (right hand), turns while holding it, lets go and checks that it flew and landed. Screenshots while holding and
     /// after landing, then quits. With the bag (--grab-test=bag) it puts the item away instead of throwing it, opens
-    /// the bag, takes the item out into the hand again and checks the amounts.
+    /// the bag, takes the item out into the hand again and checks the amounts. --grab-test=use then also takes a
+    /// potion out of the bag with the hero hurt and drinks it.
     /// </summary>
     public partial class GrabTest : Node
     {
@@ -21,13 +23,18 @@ namespace GothicGodot.Interaction
         private Vector3 _start;
         private Vector3 _releasedAt;
         private InventoryPanel _bag;
+        private MouthUse _mouth;
+        private Func<ZenKit.Daedalus.NpcInstance> _hero;
 
-        public void Init(GothicPlayer player, Node3D items, string screenshot, InventoryPanel bag = null)
+        public void Init(GothicPlayer player, Node3D items, string screenshot, InventoryPanel bag = null,
+            MouthUse mouth = null, Func<ZenKit.Daedalus.NpcInstance> hero = null)
         {
             _player = player;
             _items = items;
             _screenshot = screenshot;
             _bag = bag;
+            _mouth = mouth;
+            _hero = hero;
         }
 
         public override void _PhysicsProcess(double delta)
@@ -133,8 +140,45 @@ namespace GothicGodot.Interaction
                     break;
                 case 12 when _time > 0.5:
                     Screenshot("taken-out");
-                    _step = 3;
+                    _step = _mouth != null ? 20 : 3;
                     _time = 0;
+                    break;
+
+                // Drinking: the item goes back into the bag, the hero is hurt, a potion from the bag is drunk.
+                case 20 when _time > 0.3:
+                    _bag.Stow(grab);
+                    var hero = _hero?.Invoke();
+                    // A healing potion if there is one (the hero also carries mana potions), else any food or drink.
+                    var items = _bag.Inventory.Items.ToList();
+                    var potion = items.FindIndex(i => IsConsumable(i) && i.Contains("HEALTH"));
+                    if (potion < 0)
+                        potion = items.FindIndex(IsConsumable);
+                    if (hero == null || potion < 0)
+                    {
+                        Finish("no hero or nothing to drink in the bag", 1);
+                        return;
+                    }
+
+                    hero.SetAttribute(ZenKit.Daedalus.NpcAttribute.HitPoints, 10);
+                    _bag.TakeOut(potion, grab);
+                    GD.Print($"[GrabTest] hurt to 10 hit points, holding {_bag.GetName(grab.Held.Instance)} ({grab.Held.Instance})");
+                    Next();
+                    break;
+                case 21 when _time > 0.5:
+                    var hitPoints = _hero().GetAttribute(ZenKit.Daedalus.NpcAttribute.HitPoints);
+                    var isUsed = _mouth.Consume(grab);
+                    var now = _hero().GetAttribute(ZenKit.Daedalus.NpcAttribute.HitPoints);
+                    if (!isUsed || now <= hitPoints || grab.Held != null)
+                    {
+                        Finish($"not drunk (hit points {hitPoints} -> {now})", 1);
+                        return;
+                    }
+
+                    Next();
+                    break;
+                case 22 when _time > 0.5:
+                    Screenshot("drunk");
+                    Finish("done", 0);
                     break;
             }
         }
@@ -168,6 +212,13 @@ namespace GothicGodot.Interaction
             spot = Vector3.Zero;
             return false;
         }
+
+        private Func<string, bool> _consumable;
+
+        private bool IsConsumable(string instance) => _consumable?.Invoke(instance) ?? false;
+
+        /// <summary>For the drink step: what the hero can drink or eat.</summary>
+        public void SetConsumable(Func<string, bool> consumable) => _consumable = consumable;
 
         private void Next()
         {
