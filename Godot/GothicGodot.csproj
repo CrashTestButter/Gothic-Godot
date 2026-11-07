@@ -1,6 +1,8 @@
 <Project Sdk="Godot.NET.Sdk/4.7.2">
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
+    <!-- The core and shim projects live below this folder; Godot's project must not compile their files twice. -->
+    <DefaultItemExcludes>$(DefaultItemExcludes);Port/**</DefaultItemExcludes>
     <!-- Godot's prebuilt Android template only runs net9.0 (non-gradle export). -->
     <TargetFramework Condition=" '$(GodotTargetPlatform)' == 'android' ">net9.0</TargetFramework>
     <EnableDynamicLoading>true</EnableDynamicLoading>
@@ -8,6 +10,11 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <LangVersion>12</LangVersion>
   </PropertyGroup>
+
+  <!-- Gothic-Unity's engine-free core (Port/GothicCore, files from Assets/Gothic-Core/Scripts) with the Unity shim. -->
+  <ItemGroup>
+    <ProjectReference Include="Port/GothicCore/GothicCore.csproj" />
+  </ItemGroup>
 
   <ItemGroup>
     <Reference Include="ZenKit">

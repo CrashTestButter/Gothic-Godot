@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- The few Unity value types, attributes and Reflex's [Inject] that Gothic-Unity's engine-free core uses,
+       implemented in plain C# so the core compiles without Unity. -->
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <LangVersion>9</LangVersion>
+    <AssemblyName>UnityShim</AssemblyName>
+    <Nullable>disable</Nullable>
+  </PropertyGroup>
+</Project>

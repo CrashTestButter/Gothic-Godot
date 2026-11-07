@@ -26,3 +26,13 @@ Gothic-Core's 359 C# files by what they take from Unity (text scan of the types 
 - Gothic-Unity's own Bink decoder, the logging and most models are already engine free.
 
 Leaning: option 2 for Domain and Services (move scene objects behind small interfaces upstream, one area at a time, as normal Gothic-Unity refactors that also help its architecture tests), option 3 (value-type shim) only as a bridge. To be confirmed with a real compile of the 183 files against a shim.
+
+## Shared core build (2026-11-07)
+
+Decided with the owner: reuse Gothic-Unity's core instead of writing everything fresh.
+
+- `Godot/Port/GothicCore/GothicCore.csproj` compiles Gothic-Unity's files straight from `Assets/Gothic-Core/Scripts` (no copies) into a `Gothic.Core` assembly the Godot project references. Merging upstream main brings their changes along.
+- `Godot/Port/UnityShim` implements what those files need from Unity and its packages in plain C#: `Vector2/3/4`, `Vector3Int`, `Quaternion`, `Mathf`, `Time` (driven by Godot frames), `Random`, `Debug` (to Godot's output), `Color`, `Bounds`, inspector attributes, inert `GameObject`/`Transform`/`MonoBehaviour` so the models compile, Reflex's `[Inject]` and `Container`, MyBox's string and collection helpers, UberLogger's channels. Gothic-Unity's `Logger` compiles unchanged on top.
+- `Godot/tools/core-files.py` finds the compiling set: files without Unity scene types plus the model seams, dropping whatever still fails until the build is clean.
+- First result: **77 of 188 candidate files compile unchanged** - NPC AI actions (go to waypoint, play animation, align, attack, ...), `AiHandler`, the properties classes, config, save-game, Marvin and UI models, parts of the VM domain, logging.
+- What blocks the rest: central services that hold Unity scene objects (NpcService 7 files, NpcHelperService 5, SaveGameService 5, DialogService 4, NpcAiService 4, MultiTypeCacheService 4, GameTimeService 3) and `AbstractAnimationAction` (20 files). These are the upstream refactor candidates: moving their scene-object parts behind interfaces lets the whole chain compile for both engines.

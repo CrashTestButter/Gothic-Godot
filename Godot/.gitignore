@@ -5,3 +5,5 @@ android/
 # Fetched by setup.sh (binaries with their own licences)
 lib/
 addons/godotopenxrvendors/
+Port/**/bin/
+Port/**/obj/
