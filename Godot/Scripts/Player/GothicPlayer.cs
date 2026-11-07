@@ -37,11 +37,16 @@ namespace GothicGodot.Player
         private double _walkLogTime;
         private Vector3 _walkStart;
         private bool _isPlaced;
+        private TeleportAimer _teleport;
+        private bool _isAiming;
+        private float _teleportTestDelay;
+        private bool _isTeleportTestDone;
 
         public Camera3D Camera => _isXr ? _xrCamera : _desktopCamera;
 
-        public void Setup(bool isXr, float slopeDegrees, float far, float walkTestSeconds)
+        public void Setup(bool isXr, float slopeDegrees, float far, float walkTestSeconds, float teleportTestDelay = 0f)
         {
+            _teleportTestDelay = teleportTestDelay;
             _isXr = isXr;
             _walkTestSeconds = walkTestSeconds;
             FloorMaxAngle = Mathf.DegToRad(slopeDegrees);
@@ -72,6 +77,9 @@ namespace GothicGodot.Player
                 if (walkTestSeconds <= 0 && DisplayServer.GetName() != "headless")
                     Input.MouseMode = Input.MouseModeEnum.Captured;
             }
+
+            _teleport = new TeleportAimer { Name = "Teleport" };
+            AddChild(_teleport);
 
             Logger.Log($"[Player] {(isXr ? "XR" : "desktop")} player, slope limit {slopeDegrees}°, step {_stepHeight} m", LogCat.VR);
         }
@@ -127,6 +135,7 @@ namespace GothicGodot.Player
                 TryStepUp(before, direction * speed * dt);
 
             HandleSnapTurn();
+            HandleTeleport(delta);
             LogWalkTest(delta);
         }
 
@@ -242,6 +251,64 @@ namespace GothicGodot.Player
             if (down.GetNormal().AngleTo(Vector3.Up) > FloorMaxAngle)
                 return;
             GlobalPosition = transform.Origin + down.GetTravel();
+        }
+
+        /// <summary>
+        /// XR: right stick forward aims, letting go teleports. Desktop: hold T to aim from the eyes. Test: one aimed
+        /// teleport ahead after --teleport-test seconds.
+        /// </summary>
+        private void HandleTeleport(double delta)
+        {
+            bool isAimingNow;
+            Vector3 origin;
+            Vector3 direction;
+            if (_isXr)
+            {
+                isAimingNow = _right.GetVector2("primary").Y > 0.7f;
+                origin = _right.GlobalPosition;
+                direction = -_right.GlobalTransform.Basis.Z;
+            }
+            else
+            {
+                isAimingNow = Input.IsKeyPressed(Key.T);
+                origin = _desktopCamera.GlobalPosition;
+                direction = -_desktopCamera.GlobalTransform.Basis.Z;
+            }
+
+            if (_teleportTestDelay > 0 && !_isTeleportTestDone)
+            {
+                _teleportTestDelay -= (float)delta;
+                isAimingNow = _teleportTestDelay > 0 || !_isAiming;
+                // Aim ahead and a little up, like a throw.
+                direction = (GetViewYaw() + Vector3.Up * 0.35f).Normalized();
+                origin = GlobalPosition + Vector3.Up * 1.4f;
+                if (_teleportTestDelay <= 0 && _isAiming)
+                    _isTeleportTestDone = true;
+            }
+
+            if (isAimingNow)
+            {
+                _isAiming = true;
+                _teleport.Aim(GetWorld3D().DirectSpaceState, origin, direction, GlobalPosition, FloorMaxAngle, this);
+                return;
+            }
+
+            if (!_isAiming)
+                return;
+            _isAiming = false;
+            var target = _teleport.Target;
+            var isValid = _teleport.IsTargetValid;
+            _teleport.Stop();
+            if (!isValid)
+            {
+                Logger.Log($"[Player] teleport refused at {target}", LogCat.VR);
+                return;
+            }
+
+            var from = GlobalPosition;
+            GlobalPosition = target;
+            Velocity = Vector3.Zero;
+            Logger.Log($"[Player] teleported {from.DistanceTo(target):F1} m to {target}", LogCat.VR);
         }
 
         private void HandleSnapTurn()

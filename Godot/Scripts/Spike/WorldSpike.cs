@@ -474,7 +474,7 @@ namespace GothicGodot.Spike
             AddChild(player);
             player.GlobalPosition = position;
             player.Setup(isXr, _args.IsGothic2 ? 50f : 45f, _args.GetFloat("far", isXr ? 600f : 1500f),
-                _args.GetFloat("walk-test", 0f));
+                _args.GetFloat("walk-test", 0f), _args.GetFloat("teleport-test", 0f));
             player.Rotation = new Vector3(0, Mathf.DegToRad(_args.GetFloat("yaw", 0f)), 0);
             _ai?.SetHero(player);
             _camera = player.Camera;

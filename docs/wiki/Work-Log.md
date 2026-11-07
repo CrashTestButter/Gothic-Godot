@@ -2,6 +2,21 @@
 
 Newest first.
 
+## 2026-11-07 - Playable: the player walks and teleports
+
+Decided with the owner: playable VR first, built on Gothic-Unity's shared core (see [[Porting-Strategy]], 77 core files compile unchanged into the Godot project).
+
+![First-person in the castle yard](images/player-castle-yard.png)
+![Teleport aim](images/player-teleport.png)
+
+- `GothicPlayer`: a capsule (CharacterBody3D) with Gothic-Unity's VR movement values - walk 1.5 m/s, run 3.5 m/s, 45° snap turn, 0.5 m steps (Godot has no step offset: tried up, forward, down when blocked), slope limit = the hero's SLIDE_ANGLE (G1 45°, G2 50°), gravity.
+- XR: XROrigin3D with head and both hands (simple hand boxes for now); room scale - the capsule follows the head with collision, the origin moves back; left stick moves (pressed: run), right stick snap-turns around the head, right stick forward aims the teleport. Desktop: WASD, mouse, Shift, Q/E, T. Built against Godot's default OpenXR action map; not tried in a headset yet.
+- Teleport: throw parabola from the hand, valid on floor within the slope limit, at most 1.5 m above the feet (Gothic-Unity's rule), with room for the body; green or red line and ring.
+- Collision: the world plus every object Gothic marks cdStatic (fences, barrels, mobs - not grass or bushes).
+- The NPCs' hero is the player now: their perceptions measure the distance to where you stand.
+- Found on the way: a spawn point can be inside a hill (the Old Camp ring's centre lies below the castle yard), so the ground is searched from 100 m above.
+- Tested without a headset (`--walk-test`, `--teleport-test`): walks on the yard at 1.5 m/s, stops at a wall, walks downhill; teleports 5.6-5.9 m along the yard, refuses a target on a wall.
+
 ## 2026-11-07 - Gothic 2: Khorinis
 
 ![Khorinis from the hills](images/khorinis-overview.png)
