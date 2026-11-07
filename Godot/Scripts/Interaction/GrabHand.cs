@@ -132,6 +132,9 @@ namespace GothicGodot.Interaction
             return sum / values.Length;
         }
 
+        /// <summary>XR: an item is within reach of the hand (the grip would take it).</summary>
+        public bool IsItemInReach() => Held == null && FindNearest() != null;
+
         private WorldItem FindNearest()
         {
             var query = new PhysicsShapeQueryParameters3D
@@ -180,7 +183,8 @@ namespace GothicGodot.Interaction
             };
             WorldItem best = null;
             var bestDistance = float.MaxValue;
-            foreach (var hit in space.IntersectShape(query, 16))
+            var hits = space.IntersectShape(query, 16);
+            foreach (var hit in hits)
             {
                 if (hit["collider"].As<GodotObject>() is not WorldItem item || item.IsHeld)
                     continue;

@@ -94,7 +94,8 @@ namespace GothicGodot.Spike
             {
                 var vobs = new VobBuilder(vfs, textures, groundLight)
                 {
-                    SeparateItems = _args.Get("items", "true") == "true"
+                    SeparateItems = _args.Get("items", "true") == "true",
+                    SeparateContainers = _args.Get("chests", "true") == "true"
                 };
                 if (vobMode == "nodes")
                 {
@@ -141,7 +142,10 @@ namespace GothicGodot.Spike
             }
 
             if (_vobs?.ItemCount > 0)
+            {
                 BuildItems(vfs, materials, watch);
+                BuildChests(vfs, materials, watch);
+            }
 
             foreach (var skipped in _args.Get("skip", "").Split(',', StringSplitOptions.RemoveEmptyEntries))
                 if (Enum.TryParse<WorldChunkBuilder.Kind>(skipped, true, out var kind))
@@ -211,9 +215,19 @@ namespace GothicGodot.Spike
                 _shots = shots.Split(';', StringSplitOptions.RemoveEmptyEntries);
         }
 
+        private bool _areChestsOpened;
+
         public override void _Process(double delta)
         {
             _time += delta;
+            // --open-chests: every unlocked chest opens after a second (for shots of the lids).
+            if (!_areChestsOpened && _time > 1 && _args.Get("open-chests", "false") == "true")
+            {
+                _areChestsOpened = true;
+                foreach (var chest in _chests.Where(c => !c.IsLocked))
+                    chest.Toggle();
+            }
+
             if (_shots.Length > 0 && _time > 0.3)
             {
                 ProcessShots(delta);
@@ -279,6 +293,64 @@ namespace GothicGodot.Spike
             _vobs.BuildItems(root, materials[3], materials[4], instance => ItemOf(instance)?.Visual, far);
             Log($"items built in {watch.ElapsedMilliseconds} ms: {_vobs.ItemsBuilt} of {_vobs.ItemCount} grabbable");
         }
+
+        private readonly List<GothicGodot.Interaction.WorldChest> _chests = new();
+
+        /// <summary>
+        /// The chests as animated models with their contents. Every item that can show up later (chest contents, what
+        /// the hero and the NPCs carry) is loaded now: the texture array is built once, after loading.
+        /// </summary>
+        private void BuildChests(Vfs vfs, ShaderMaterial[] materials, Stopwatch watch)
+        {
+            var factories = new Dictionary<string, ModelFactory>(StringComparer.OrdinalIgnoreCase);
+            var root = new Node3D { Name = "Chests" };
+            AddChild(root);
+            var itemRoot = GetNode<Node3D>("Items");
+            foreach (var (vob, model, transform) in _vobs.Containers)
+            {
+                if (!factories.TryGetValue(model, out var factory))
+                {
+                    try
+                    {
+                        factory = new ModelFactory(vfs, _vobs.Textures, materials[3], materials[4], model);
+                    }
+                    catch (Exception e)
+                    {
+                        GD.PushWarning($"[Chest] model {model} can't be loaded: {e.Message}");
+                    }
+
+                    factories[model] = factory;
+                }
+
+                if (factory == null)
+                    continue;
+                var chest = new GothicGodot.Interaction.WorldChest
+                {
+                    Name = $"{(string.IsNullOrEmpty(vob.Name) ? model : vob.Name)}_{_chests.Count}"
+                };
+                root.AddChild(chest);
+                chest.Transform = transform;
+                var isLocked = vob.IsLocked && (!string.IsNullOrEmpty(vob.Key) || !string.IsNullOrEmpty(vob.PickString));
+                if (!chest.Setup(factory, vob.Contents ?? "", isLocked, _vobs.LightAt(transform.Origin), CreateItem, itemRoot))
+                {
+                    chest.QueueFree();
+                    continue;
+                }
+
+                _chests.Add(chest);
+                foreach (var entry in Gothic.Core.Extensions.ContentItemExtension.UnpackItems(vob.Contents ?? ""))
+                    _vobs.Preload(ItemInfo(entry.Name.Trim())?.Visual);
+            }
+
+            if (_ai != null)
+                foreach (var npc in _ai.Npcs.Append(_ai.Hero))
+                    foreach (var instance in npc.Inventory.Items)
+                        _vobs.Preload(ItemInfo(instance)?.Visual);
+            Log($"chests built in {watch.ElapsedMilliseconds} ms: {_chests.Count} of {_vobs.Containers.Count} " +
+                $"({_chests.Count(c => c.IsLocked)} locked)");
+        }
+
+        public IReadOnlyList<GothicGodot.Interaction.WorldChest> Chests => _chests;
 
         /// <summary>The script instance of an item by name (C_ITEM), cached.</summary>
         public Func<string, ZenKit.Daedalus.ItemInstance> ItemInfo { get; private set; }
@@ -630,11 +702,25 @@ namespace GothicGodot.Spike
                     test.SetConsumable(_ai.IsConsumable);
             }
 
+            GothicGodot.Dialog.DialogPanel dialogPanel = null;
             if (_ai?.Dialog != null)
             {
-                var dialog = new GothicGodot.Dialog.DialogPanel { Name = "Dialog" };
+                var dialog = dialogPanel = new GothicGodot.Dialog.DialogPanel { Name = "Dialog" };
                 AddChild(dialog);
                 dialog.Init(_ai, player, _args.Get("dialog-test", ""), _args.Screenshot);
+            }
+
+            if (_chests.Count > 0)
+            {
+                var opener = new GothicGodot.Interaction.ChestOpener { Name = "ChestOpener" };
+                AddChild(opener);
+                opener.Init(player, _chests, () => _ai?.Dialog?.IsActive != true && dialogPanel?.HasTarget != true);
+                if (_args.Get("chest-test", "false") == "true")
+                {
+                    var test = new GothicGodot.Interaction.ChestTest { Name = "ChestTest" };
+                    AddChild(test);
+                    test.Init(player, _chests, _args.Screenshot, GetNodeOrNull<GothicGodot.Interaction.InventoryPanel>("Bag"));
+                }
             }
         }
 

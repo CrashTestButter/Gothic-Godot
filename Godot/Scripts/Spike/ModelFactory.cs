@@ -24,6 +24,44 @@ namespace GothicGodot.Spike
             public int[] Nodes;
             public Vector3[] Positions;
             public Quaternion[] Rotations;
+
+            public double Duration => Fps > 0 ? FrameCount / Fps : 0;
+
+            /// <summary>The pose at the time (seconds), frames interpolated; held on the last frame if not looping.</summary>
+            /// <param name="isOnePoseCall">One SetBonePose per bone instead of position and rotation calls.</param>
+            public void Apply(Skeleton3D skeleton, double time, bool isLooping, bool isOnePoseCall = false)
+            {
+                if (FrameCount == 0)
+                    return;
+                var t = time * Fps;
+                var last = FrameCount - 1;
+                if (isLooping)
+                    t %= FrameCount;
+                else if (t > last)
+                    t = last;
+
+                var frame0 = (int)t;
+                var frame1 = isLooping ? (frame0 + 1) % FrameCount : Math.Min(frame0 + 1, last);
+                var weight = (float)(t - frame0);
+                var channels = Nodes.Length;
+                for (var channel = 0; channel < channels; channel++)
+                {
+                    var a = frame0 * channels + channel;
+                    var b = frame1 * channels + channel;
+                    var bone = Nodes[channel];
+                    var position = Positions[a].Lerp(Positions[b], weight);
+                    var rotation = Rotations[a].Slerp(Rotations[b], weight);
+                    if (isOnePoseCall)
+                    {
+                        skeleton.SetBonePose(bone, new Transform3D(new Basis(rotation), position));
+                    }
+                    else
+                    {
+                        skeleton.SetBonePosePosition(bone, position);
+                        skeleton.SetBonePoseRotation(bone, rotation);
+                    }
+                }
+            }
         }
 
         private readonly Vfs _vfs;

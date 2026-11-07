@@ -82,7 +82,7 @@ namespace GothicGodot.Player
             SafeMargin = 0.02f;
 
             CollisionLayer = Interaction.PhysicsLayers.Player;
-            CollisionMask = Interaction.PhysicsLayers.World;
+            CollisionMask = Interaction.PhysicsLayers.World | Interaction.PhysicsLayers.Mobs;
             _shape = new CollisionShape3D { Shape = new CapsuleShape3D { Radius = _radius, Height = _desktopEyeHeight } };
             _shape.Position = new Vector3(0, _desktopEyeHeight * 0.5f, 0);
             AddChild(_shape);

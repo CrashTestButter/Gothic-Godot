@@ -86,7 +86,7 @@ namespace GothicGodot.Interaction
             var item = hand?.TakeAway();
             if (item == null)
                 return false;
-            _inventory.Add(item.Instance);
+            _inventory.Add(item.Instance, item.Amount);
             GD.Print($"[Bag] {GetName(item.Instance)} put away ({_inventory[item.Instance]} now)");
             item.QueueFree();
             return true;
@@ -158,7 +158,7 @@ namespace GothicGodot.Interaction
             if (!_player.IsXr || !IsInBackpackZone(hand.GlobalPosition))
                 return;
             item.Take();
-            _inventory.Add(item.Instance);
+            _inventory.Add(item.Instance, item.Amount);
             GD.Print($"[Bag] {GetName(item.Instance)} put away over the shoulder");
             item.QueueFree();
         }

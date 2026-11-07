@@ -2,6 +2,18 @@
 
 Newest first.
 
+## 2026-11-07 - Chests
+
+![An open chest in the Old Camp, a beer and arrows inside](images/chest-open.png)
+
+- Chests (oCMobContainer) leave the merged cells: each is its own animated model through the model factory (body and lid are rigid parts on two bones), closed S_S0, opening T_S0_2_S1, open S_S1, closing T_S1_2_S0, with a box collider like the merged chests had (cdStatic).
+- The first opening lays the contents out inside (the ZEN's list, e.g. `ITKELOCKPICK:3,ITFOBEER:2,ITLSTORCH:2,ITAMARROW:10`, parsed with Gothic-Unity's own ContentItem code from the shared core): one item per entry standing for its amount, so a stack of 10 arrows goes into the bag as 10.
+- XR: the grip with an empty hand on the lid (no item in reach) opens or closes it; desktop: F at a chest in front within 2.2 m when no NPC to talk to is in front.
+- Old Camp: 249 chests, 193 of them locked (a key or a lock combination) - those stay shut until lock picking exists. Khorinis: 158, 108 locked.
+- Chests get their own physics layer (mobs): solid for the player and for items, but not a "wall" for the desktop pick, which otherwise stopped at the chest's box before reaching the coins inside. Flat items (coins, letters) get a thin box instead of a convex hull without thickness.
+- Texture array: items can now appear after loading (chest contents, items out of the bag), but the array is built once; every item that can show up (chest contents, all NPC and hero inventories) is loaded before it is built. Items from scripts at run time (Wld_InsertItem, rewards with new items) will need a growing array or a second material.
+- `--chest-test=true`: walks to the nearest unlocked chest with contents, opens it (and checks the desktop pick finds that chest), takes the first item out and puts it into the bag: G1 3 lock picks, G2 32 gold. `--open-chests=true` opens every unlocked chest for shots.
+
 ## 2026-11-07 - Monsters: every model with its own skeleton
 
 ![A sheep in Khorinis](images/monster-sheep.png)

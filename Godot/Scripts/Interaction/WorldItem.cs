@@ -9,13 +9,16 @@ namespace GothicGodot.Interaction
     public partial class WorldItem : RigidBody3D
     {
         public string Instance;
+
+        /// <summary>How many this body stands for (a chest's stack of 20 nuggets is one body).</summary>
+        public int Amount = 1;
         public bool IsHeld { get; private set; }
 
         /// <param name="far">Hidden beyond this many metres (0: always drawn); items are small, each one is a draw.</param>
-        public void Setup(Mesh mesh, Shape3D shape, Color tint, float far)
+        public void Setup(Mesh mesh, Shape3D shape, Vector3 shapeOffset, Color tint, float far)
         {
             CollisionLayer = PhysicsLayers.Items;
-            CollisionMask = PhysicsLayers.World | PhysicsLayers.Items;
+            CollisionMask = PhysicsLayers.World | PhysicsLayers.Mobs | PhysicsLayers.Items;
             Mass = 0.5f;
             FreezeMode = FreezeModeEnum.Kinematic;
             Freeze = true;
@@ -26,7 +29,7 @@ namespace GothicGodot.Interaction
             };
             AddChild(instance);
             instance.SetInstanceShaderParameter("tint", tint);
-            AddChild(new CollisionShape3D { Shape = shape });
+            AddChild(new CollisionShape3D { Shape = shape, Position = shapeOffset });
         }
 
         public void Take()

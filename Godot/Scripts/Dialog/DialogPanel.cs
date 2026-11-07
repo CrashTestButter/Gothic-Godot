@@ -56,6 +56,9 @@ namespace GothicGodot.Dialog
         private int _testLines;
         private int _testVoices;
 
+        /// <summary>An NPC to talk to is in front of the hero (F / the trigger talks to it).</summary>
+        public bool HasTarget => _target != null && _dialog?.IsActive == false;
+
         public void Init(GothicAi ai, GothicPlayer player, string testNpc, string screenshot)
         {
             _ai = ai;

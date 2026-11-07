@@ -740,38 +740,7 @@ namespace GothicGodot.Spike
 
         private void Animate(GothicNpc npc)
         {
-            var clip = npc.Clip;
-            if (clip == null)
-                return;
-
-            var t = npc.ClipTime * clip.Fps;
-            var last = clip.FrameCount - 1;
-            if (npc.IsClipLooping)
-                t %= clip.FrameCount;
-            else if (t > last)
-                t = last;
-
-            var frame0 = (int)t;
-            var frame1 = npc.IsClipLooping ? (frame0 + 1) % clip.FrameCount : Math.Min(frame0 + 1, last);
-            var weight = (float)(t - frame0);
-            var channels = clip.Nodes.Length;
-            for (var channel = 0; channel < channels; channel++)
-            {
-                var a = frame0 * channels + channel;
-                var b = frame1 * channels + channel;
-                var bone = clip.Nodes[channel];
-                var position = clip.Positions[a].Lerp(clip.Positions[b], weight);
-                var rotation = clip.Rotations[a].Slerp(clip.Rotations[b], weight);
-                if (BoneMode == "pose")
-                {
-                    npc.Skeleton.SetBonePose(bone, new Transform3D(new Basis(rotation), position));
-                }
-                else
-                {
-                    npc.Skeleton.SetBonePosePosition(bone, position);
-                    npc.Skeleton.SetBonePoseRotation(bone, rotation);
-                }
-            }
+            npc.Clip?.Apply(npc.Skeleton, npc.ClipTime, npc.IsClipLooping, BoneMode == "pose");
         }
 
         // ---- Externals ----

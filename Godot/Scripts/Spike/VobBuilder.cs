@@ -26,12 +26,19 @@ namespace GothicGodot.Spike
         private readonly GroundLightSampler _light;
         private readonly Dictionary<string, List<MeshPart>> _parts = new(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, ArrayMesh> _meshes = new(StringComparer.OrdinalIgnoreCase);
-        private readonly Dictionary<string, Shape3D> _shapes = new(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, (Shape3D Shape, Vector3 Offset)> _shapes = new(StringComparer.OrdinalIgnoreCase);
+        private const float _minItemThickness = 0.02f;
         private readonly List<(IItem Vob, string Visual, Transform3D Transform)> _items = new();
 
         /// <summary>Items (oCItem) are left out of the merged cells and collected for <see cref="BuildItems"/>.</summary>
         public bool SeparateItems { get; set; }
+
+        /// <summary>Chests (oCMobContainer with a model script) are left out of the cells for <see cref="Containers"/>.</summary>
+        public bool SeparateContainers { get; set; }
+
+        public List<(IContainer Vob, string Model, Transform3D Transform)> Containers { get; } = new();
         public int ItemCount => _items.Count;
+        public TextureArrayBuilder Textures => _textures;
         public int ItemsBuilt { get; private set; }
 
         public int InstanceCount { get; private set; }
@@ -107,6 +114,27 @@ namespace GothicGodot.Spike
             }
         }
 
+        /// <summary>Loads an item's mesh and textures now, before the texture array is built (items made later).</summary>
+        public void Preload(string visual)
+        {
+            if (!string.IsNullOrEmpty(visual) && IsMeshVisual(visual))
+                GetParts(visual);
+        }
+
+        public Color LightAt(Vector3 position) => SampleLight(position);
+
+        /// <summary>The convex hull, or a box for flat items (coins, letters): a hull without thickness doesn't collide.</summary>
+        private static (Shape3D, Vector3) GetItemShape(ArrayMesh mesh)
+        {
+            var bounds = mesh.GetAabb();
+            var size = bounds.Size;
+            if (size.X >= _minItemThickness && size.Y >= _minItemThickness && size.Z >= _minItemThickness)
+                return (mesh.CreateConvexShape(true, true), Vector3.Zero);
+            var box = new Vector3(Mathf.Max(size.X, _minItemThickness), Mathf.Max(size.Y, _minItemThickness),
+                Mathf.Max(size.Z, _minItemThickness));
+            return (new BoxShape3D { Size = box }, bounds.GetCenter());
+        }
+
         /// <summary>One item body (also for items taken out of the inventory); null without a mesh.</summary>
         public GothicGodot.Interaction.WorldItem CreateItem(string instance, string visual, Transform3D transform,
             Material opaque, Material alpha, float far)
@@ -118,9 +146,9 @@ namespace GothicGodot.Spike
                 return null;
             var mesh = GetArrayMesh(visual, parts, opaque, alpha);
             if (!_shapes.TryGetValue(visual, out var shape))
-                _shapes[visual] = shape = mesh.CreateConvexShape(true, true);
+                _shapes[visual] = shape = GetItemShape(mesh);
             var item = new GothicGodot.Interaction.WorldItem { Name = instance, Instance = instance, Transform = transform };
-            item.Setup(mesh, shape, SampleLight(transform.Origin), far);
+            item.Setup(mesh, shape.Shape, shape.Offset, SampleLight(transform.Origin), far);
             return item;
         }
 
@@ -136,6 +164,12 @@ namespace GothicGodot.Spike
                 {
                     // The visual comes from the item's script instance (C_ITEM.visual), resolved in BuildItems.
                     _items.Add((item, visual,
+                        new Transform3D(ToGodot(vob.Rotation), WorldChunkBuilder.ToGodot(vob.Position))));
+                }
+                else if (SeparateContainers && vob is IContainer container &&
+                         visual?.EndsWith(".MDS", StringComparison.OrdinalIgnoreCase) == true)
+                {
+                    Containers.Add((container, System.IO.Path.GetFileNameWithoutExtension(visual).ToUpperInvariant(),
                         new Transform3D(ToGodot(vob.Rotation), WorldChunkBuilder.ToGodot(vob.Position))));
                 }
                 else if (vob.ShowVisual && !string.IsNullOrEmpty(visual) && IsMeshVisual(visual))
