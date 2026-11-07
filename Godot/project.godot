@@ -1,0 +1,33 @@
+; Engine configuration file.
+
+config_version=5
+
+[application]
+
+config/name="Gothic-Godot"
+run/main_scene="res://Scenes/Spike.tscn"
+config/features=PackedStringArray("4.7", "C#", "Mobile")
+
+[dotnet]
+
+project/assembly_name="GothicGodot"
+
+[rendering]
+
+renderer/rendering_method="mobile"
+textures/vram_compression/import_etc2_astc=true
+anti_aliasing/quality/msaa_3d=2
+limits/global_shader_variables/buffer_size=262144
+
+[xr]
+
+openxr/enabled=false
+openxr/enabled.android=true
+openxr/foveation_level=3
+openxr/foveation_dynamic=true
+openxr/extensions/hand_tracking=true
+shaders/enabled=true
+
+[physics]
+
+3d/physics_engine="Jolt Physics"

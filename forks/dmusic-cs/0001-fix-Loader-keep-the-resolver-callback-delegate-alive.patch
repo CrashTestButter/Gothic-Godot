@@ -1,0 +1,40 @@
+From 78bb7dcac0f2caaf60aa2912dbd09088d0f1e263 Mon Sep 17 00:00:00 2001
+From: Todi <4650690+CrashTestButter@users.noreply.github.com>
+Date: Sat, 7 Nov 2026 16:12:59 +0100
+Subject: [PATCH] fix(Loader): keep the resolver callback delegate alive
+
+The resolver was passed to DmLoader_addResolver as a method group, which creates a new delegate for the call
+that nothing references afterwards. On .NET and Mono the garbage collector frees it and the next
+DmLoader_getSegment calls into freed memory ("A callback was made on a garbage collected delegate of type
+DmLoaderResolverCallback"). Logger and RandomNumberGenerator already keep their handlers in a static field.
+---
+ DirectMusic/Loader.cs | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/DirectMusic/Loader.cs b/DirectMusic/Loader.cs
+index bacd5bb..4837b84 100644
+--- a/DirectMusic/Loader.cs
++++ b/DirectMusic/Loader.cs
+@@ -24,6 +24,10 @@ namespace DirectMusic
+ 		/// <returns>A memory buffer containing the file data or <c>null</c> if the lookup failed.</returns>
+ 		public delegate byte[]? ResolveCallback(string name);
+ 
++		// The native loader keeps this function pointer: a delegate created per call (method group) can be collected
++		// by the garbage collector on .NET and Mono, and the next segment lookup then calls freed memory.
++		private static readonly Native.DmLoaderResolverCallback NativeHandler = _nativeCallbackHandler;
++
+ 		private readonly List<GCHandle> _callbacks = new List<GCHandle>();
+ 		internal readonly IntPtr Handle;
+ 
+@@ -48,7 +52,7 @@ namespace DirectMusic
+ 		public void AddResolver(ResolveCallback resolve)
+ 		{
+ 			var cb = GCHandle.Alloc(resolve);
+-			Native.DmLoader_addResolver(Handle, _nativeCallbackHandler, GCHandle.ToIntPtr(cb)).Check();
++			Native.DmLoader_addResolver(Handle, NativeHandler, GCHandle.ToIntPtr(cb)).Check();
+ 			_callbacks.Add(cb);
+ 		}
+ 
+-- 
+2.56.0
+

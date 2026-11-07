@@ -1,0 +1,51 @@
+<Project Sdk="Godot.NET.Sdk/4.7.2">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <!-- The core and shim projects live below this folder; Godot's project must not compile their files twice. -->
+    <DefaultItemExcludes>$(DefaultItemExcludes);Port/**</DefaultItemExcludes>
+    <!-- Godot's prebuilt Android template only runs net9.0 (non-gradle export). -->
+    <TargetFramework Condition=" '$(GodotTargetPlatform)' == 'android' ">net9.0</TargetFramework>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+    <RootNamespace>GothicGodot</RootNamespace>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <LangVersion>12</LangVersion>
+  </PropertyGroup>
+
+  <!-- Gothic-Unity's engine-free core (Port/GothicCore, files from Assets/Gothic-Core/Scripts) with the Unity shim. -->
+  <ItemGroup>
+    <ProjectReference Include="Port/GothicCore/GothicCore.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="ZenKit">
+      <HintPath>lib/ZenKit.dll</HintPath>
+    </Reference>
+    <Reference Include="DirectMusic">
+      <HintPath>lib/DirectMusic.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+
+  <!-- Native libraries go next to the published assemblies; Godot's export puts every .so of the publish output
+       into the APK's lib/<abi> folder. The editor loads the linux-x64 ones through NativeLibraries.cs. -->
+  <ItemGroup Condition=" $(RuntimeIdentifier.StartsWith('android')) or $(RuntimeIdentifier.StartsWith('linux-bionic')) ">
+    <None Include="lib/android-arm64/*.so" CopyToPublishDirectory="PreserveNewest" Link="%(Filename)%(Extension)" />
+  </ItemGroup>
+  <ItemGroup Condition=" $(RuntimeIdentifier.StartsWith('linux-x64')) ">
+    <None Include="lib/linux-x64/*.so" CopyToPublishDirectory="PreserveNewest" Link="%(Filename)%(Extension)" />
+  </ItemGroup>
+  <!-- Quest with NativeAOT (export preset "QuestAOT", "Android Use Linux Bionic"): C# compiled ahead of time to
+       native code instead of MonoVM. Needs the Android NDK's clang first on PATH. -->
+  <PropertyGroup Condition=" $(RuntimeIdentifier.StartsWith('linux-bionic')) ">
+    <PublishAot>true</PublishAot>
+    <UseMonoRuntime>false</UseMonoRuntime>
+    <DisableUnsupportedError>true</DisableUnsupportedError>
+    <PublishAotUsingRuntimePack>true</PublishAotUsingRuntimePack>
+  </PropertyGroup>
+  <ItemGroup Condition=" $(RuntimeIdentifier.StartsWith('linux-bionic')) ">
+    <TrimmerRootAssembly Include="GodotSharp" />
+    <TrimmerRootAssembly Include="$(TargetName)" />
+    <TrimmerRootAssembly Include="ZenKit" />
+    <TrimmerRootAssembly Include="DirectMusic" />
+    <LinkerArg Include="-Wl,--undefined-version" />
+  </ItemGroup>
+</Project>
