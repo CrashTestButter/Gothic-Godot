@@ -19,14 +19,18 @@ DOTNET = os.path.expanduser("~/opt/dotnet/dotnet")
 SCENE = {"GameObject", "Transform", "MonoBehaviour", "Component", "Resources", "Mesh", "Material", "Texture2D",
          "Texture", "Shader", "Renderer", "MeshRenderer", "SkinnedMeshRenderer", "MeshFilter", "Collider",
          "BoxCollider", "MeshCollider", "CapsuleCollider", "SphereCollider", "Rigidbody", "Physics", "AudioSource",
-         "AudioClip", "Light", "Camera", "Coroutine", "WaitForSeconds", "Animator", "ParticleSystem", "SceneManager",
+         "AudioClip", "Light", "Camera", "Animator", "ParticleSystem", "SceneManager",
          "Application", "Canvas", "RectTransform", "Sprite", "Image", "Button", "Graphics", "RenderTexture",
          "Behaviour", "ScriptableObject", "PlayerPrefs", "Screen", "Input", "LineRenderer", "TextMeshPro", "TMP_Text",
          "LODGroup", "Terrain", "CharacterController", "Collision", "Joint", "AnimationClip", "NativeArray"}
 SEAMS = ["Models/Container/NpcContainer.cs", "Models/Container/VobContainer.cs",
          "Adapters/Properties/AbstractProperties.cs", "Adapters/Properties/NpcProperties.cs",
          "Adapters/Properties/VobProperties.cs", "Adapters/Properties/VobSpotProperties.cs",
-         "Adapters/Npc/NpcPrefabProperties.cs", "Logging/Logger.cs"]
+         "Adapters/Npc/NpcPrefabProperties.cs", "Logging/Logger.cs",
+         # Coroutines run in the shim (Port/UnityShim/Coroutines.cs), so the coroutine host compiles too.
+         "Services/UnityMonoService.cs",
+         # The event bus: UnityEvent comes from the shim (Port/UnityShim/Events.cs).
+         "GlobalEventDispatcher.cs"]
 SEAMS += ["Adapters/Properties/Vobs/" + f for f in os.listdir(os.path.join(SCRIPTS, "Adapters/Properties/Vobs"))
           if f.endswith(".cs")]
 

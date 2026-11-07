@@ -31,6 +31,9 @@ namespace UnityEngine
 
     public class MonoBehaviour : Behaviour
     {
+        public Coroutine StartCoroutine(System.Collections.IEnumerator routine) => CoroutineRunner.Start(routine, this);
+        public void StopCoroutine(Coroutine routine) => CoroutineRunner.Stop(routine);
+        public void StopAllCoroutines() => CoroutineRunner.StopAll(this);
     }
 
     public class ScriptableObject : Object

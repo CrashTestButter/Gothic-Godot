@@ -55,6 +55,7 @@ How tied Gothic-Unity is to Unity today (split/14, 2026-11-06): 573 C# files (~8
 ### R7 - Code sharing with Gothic-Unity
 - The team keeps developing in Unity. A port that can't take their work is dead after a few weeks.
 - Spike (2026-11-07): 77 of Gothic-Unity's 188 core files compile unchanged in the Godot project through a small Unity shim; the dialog voices already use Gothic-Unity's own ADPCM decoder from it.
+- Followed one chain to its end (GameTimeService): coroutines, MyBox attributes and UnityEvent are now in the shim; what is left is that the core's NpcContainer / VobContainer reference Unity adapter components - one upstream refactor away from most services compiling for both engines.
 - Status: **path**, see [[Porting-Strategy]].
 
 ## Low

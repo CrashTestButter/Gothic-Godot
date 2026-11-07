@@ -98,6 +98,7 @@
     <Compile Include="$(CoreScripts)/Services/Context/ContextTextInputService.cs" Link="Core/Services/Context/ContextTextInputService.cs" />
     <Compile Include="$(CoreScripts)/Services/Context/IContextGameVersionService.cs" Link="Core/Services/Context/IContextGameVersionService.cs" />
     <Compile Include="$(CoreScripts)/Services/Context/IContextTextInputService.cs" Link="Core/Services/Context/IContextTextInputService.cs" />
+    <Compile Include="$(CoreScripts)/Services/UnityMonoService.cs" Link="Core/Services/UnityMonoService.cs" />
     <Compile Include="$(CoreScripts)/Services/World/ISaveStateSection.cs" Link="Core/Services/World/ISaveStateSection.cs" />
   </ItemGroup>
 </Project>

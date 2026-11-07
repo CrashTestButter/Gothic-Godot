@@ -23,6 +23,7 @@ namespace UnityEngine
             time += deltaTime;
             unscaledTime += delta;
             frameCount++;
+            CoroutineRunner.StepAll();
         }
     }
 

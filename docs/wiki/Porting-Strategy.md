@@ -36,3 +36,18 @@ Decided with the owner: reuse Gothic-Unity's core instead of writing everything 
 - `Godot/tools/core-files.py` finds the compiling set: files without Unity scene types plus the model seams, dropping whatever still fails until the build is clean.
 - First result: **77 of 188 candidate files compile unchanged** - NPC AI actions (go to waypoint, play animation, align, attack, ...), `AiHandler`, the properties classes, config, save-game, Marvin and UI models, parts of the VM domain, logging.
 - What blocks the rest: central services that hold Unity scene objects (NpcService 7 files, NpcHelperService 5, SaveGameService 5, DialogService 4, NpcAiService 4, MultiTypeCacheService 4, GameTimeService 3) and `AbstractAnimationAction` (20 files). These are the upstream refactor candidates: moving their scene-object parts behind interfaces lets the whole chain compile for both engines.
+
+## What blocks the core services, one chain followed (2026-11-07)
+
+Counting Unity scene types in the services that block the most files: the coupling is smaller than it looked. NpcService: 7 `.transform`, 7 `GameObject`, 3 `Object.Destroy`, 2 coroutines. NpcHelperService: 14 `.transform`, a few raycasts and materials. DialogService: 4 `GameObject`, 3 coroutines, 3 `Object.Destroy`. NpcAiService: 12 `.transform`. GameTimeService: one coroutine. SaveGameService: one coroutine (its "Mesh" is ZenKit's).
+
+Following GameTimeService to the end:
+
+1. Coroutines - **solved in the shim**: `Port/UnityShim/Coroutines.cs` runs `StartCoroutine` / `WaitForSeconds` / `WaitUntil` / nested routines once per Godot frame, so `UnityMonoService` (the core's coroutine host) compiles.
+2. `ConfigService` - needs `DeveloperConfig`, which needs MyBox's inspector attributes (`ConditionalField`, `Separator`, `OverrideLabel`, `Foldout`, `CollectionWrapper<T>`) - **solved in the shim** as no-ops.
+3. `GlobalEventDispatcher` (the event bus) - needs `UnityEvent` - **solved in the shim** (`Port/UnityShim/Events.cs`).
+4. The event bus carries `NpcContainer` and `VobContainer`, and those reference the Unity adapters directly: `NpcContainer` holds `NpcProperties` / `NpcPrefabProperties` (MonoBehaviours), `VobContainer` holds `VobProperties2` and uses `VmCacheService`. **This is the link to cut upstream**: if the containers held plain data (or interfaces) instead of the adapter components, the event bus, the config, the clock, the save game and most services above them could compile for both engines.
+
+Suggested upstream steps, each small and useful for Gothic-Unity's own layer rules (Core models shouldn't know adapters): move the data the services read from `NpcProperties` / `NpcPrefabProperties` into a model class the container owns; let the adapters hold a reference to it instead of the other way round. Then positions through the container (`Position`, `Forward`) instead of `.transform`, and the few `Object.Destroy` / coroutine calls behind a small scheduler or factory interface.
+
+Status: the core set is 78 files (the coroutine host joined); the shim is ready for the next 20-30 once the container link is cut.
