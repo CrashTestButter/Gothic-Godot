@@ -2,6 +2,15 @@
 
 Newest first.
 
+## 2026-11-07 - NPCs talk among themselves: freepoints and SVM lines
+
+- Freepoints (zCVobSpot, e.g. FP_SMALLTALK_OC_01) with Gothic-Unity's rules: Wld_IsFPAvailable / Wld_IsNextFPAvailable look within 7 m, AI_GotoFP / AI_GotoNextFP walk to the nearest free one (over the waynet to its nearest waypoint, then straight) and hold it while the NPC is there, the old one is let go; Npc_IsOnFP, AI_AlignToFP. Also Wld_DetectNpc(Ex) (another NPC or the hero within the senses range by instance, state and guild; becomes `other`) and AI_TurnToNpc.
+- With those the camp's ambient states run their course: smalltalk pairs, guards, people standing around. Their voice lines are AI_OutputSVM / AI_OutputSVM_Overlay: SVM_<voice>_<key> names the WAV (and the OU.BIN subtitle), like Gothic-Unity's OutputSvm. The line plays at the NPC's head; the queue waits for it unless it's an overlay.
+- Old Camp, 40 s: 119 lines across the camp (guards, Gor Hanis, Dexter, Cutter, diggers); only NPCs within 30 m of the hero load and play theirs (26 in 35 s).
+- Garbage: decoding a new line (WAV bytes, IMA ADPCM) made 1-6 MB per second of garbage on the main thread whenever many new lines came in. Decoding now runs on a worker thread (the VFS read stays on the main thread, like Gothic-Unity's sounds since #461) and only in hearing range: 66-181 KB per second, 2 small collections in 20 s; inside script calls 30 KB per second.
+- AI cost rose with the states that now actually run: 5.9 -> 14 ms per second (0.2 ms per frame) on the desktop for 134 NPCs. Quest estimate ~70 ms per second; to measure.
+- `--count-externals` lists the scripts' externals the spike doesn't have yet, by calls (top now: ConcatStrings and IntToString for debug prints, Npc_GetBodyState, Hlp_IsItem, Npc_GetEquippedArmor, AI_AlignToWP, Npc_PerceiveAll).
+
 ## 2026-11-07 - What the new features cost
 
 Old Camp on the desktop with the Quest benchmark settings (one Quest eye's resolution 2064x2208, MSAA 2x, objects 80 m, particles 40 m, animation culling, occluders, 134 scripted NPCs, the turning camera), all features on (746 items, 291 chests and doors, 608 sound objects, music, the dialog system) against all off:

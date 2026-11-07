@@ -107,6 +107,16 @@ namespace GothicGodot.Audio
             player.Play();
         }
 
+        /// <summary>A voice line at a place in the world (NPC talk), louder and further than effects.</summary>
+        public void PlayVoice(AudioStreamWav stream, Vector3 position)
+        {
+            var player = _players3d[_next3d++ % _players3d.Count];
+            player.Stream = stream;
+            player.GlobalPosition = position;
+            player.VolumeDb = 0;
+            player.Play();
+        }
+
         /// <summary>Snd_Play3d: at a place in the world (an NPC).</summary>
         public void Play3d(string name, Vector3 position)
         {

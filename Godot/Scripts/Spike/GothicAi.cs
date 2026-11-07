@@ -87,6 +87,8 @@ namespace GothicGodot.Spike
 
             foreach (var point in world.WayNet.Points)
                 _waypoints[point.Name] = MeshPart.ToGodot(point.Position);
+            foreach (var vob in world.RootObjects)
+                CollectFreePoints(vob);
             foreach (var edge in world.WayNet.Edges)
             {
                 AddEdge(edge.A.Name, edge.B.Name);
@@ -165,6 +167,44 @@ namespace GothicGodot.Spike
 
             _factories[model] = factory;
             return factory;
+        }
+
+        private const float _freePointLookup = 7f;
+        private readonly List<GothicNpc.FreePoint> _freePoints = new();
+
+        private void CollectFreePoints(ZenKit.Vobs.IVirtualObject vob)
+        {
+            if (vob.Type == ZenKit.Vobs.VirtualObjectType.zCVobSpot && !string.IsNullOrEmpty(vob.Name))
+                _freePoints.Add(new GothicNpc.FreePoint
+                {
+                    Name = vob.Name,
+                    Position = MeshPart.ToGodot(vob.Position),
+                    // Gothic's forward (+Z) is -Z here, like the models.
+                    Direction = -VobBuilder.ToGodot(vob.Rotation).Z.Normalized()
+                });
+            foreach (var child in vob.Children)
+                CollectFreePoints(child);
+        }
+
+        /// <summary>The nearest free point whose name contains the part (the NPC's own one counts as free).</summary>
+        private GothicNpc.FreePoint FindFreePoint(GothicNpc npc, string part, float maxDistance, bool isOtherThanCurrent)
+        {
+            GothicNpc.FreePoint best = null;
+            var bestDistance = maxDistance;
+            foreach (var point in _freePoints)
+            {
+                if (point.Name.IndexOf(part, StringComparison.OrdinalIgnoreCase) < 0)
+                    continue;
+                if (point.Occupant != null && point.Occupant != npc || isOtherThanCurrent && point == npc.CurrentFreePoint)
+                    continue;
+                var distance = point.Position.DistanceTo(npc.Position);
+                if (distance >= bestDistance)
+                    continue;
+                best = point;
+                bestDistance = distance;
+            }
+
+            return best;
         }
 
         private void AddEdge(string from, string to)
@@ -342,7 +382,7 @@ namespace GothicGodot.Spike
                      $"(VM {_vmMs / _frames:F2} ms; {_aiMs:F1} / {_vmMs:F1} ms per second), " +
                      $"animation {_boneMs / _frames:F2} ms ({_animatedSum / _frames} animated); per second " +
                      $"{_loops} state loops, {_perceptions} perceptions, {_externals + _defaultExternals} externals " +
-                     $"({_defaultExternals} default)");
+                     $"({_defaultExternals} default), {_spoken} lines spoken so far");
             var allocatedTotal = GC.GetAllocatedBytesForCurrentThread();
             GD.Print($"[Ai] allocated per second: {(allocatedTotal - _allocatedAtLastLog) / 1024} KB on the main thread, " +
                      $"{_allocatedInCalls / 1024} KB inside script calls; top: " + string.Join(", ",
@@ -350,6 +390,9 @@ namespace GothicGodot.Spike
             _allocatedAtLastLog = allocatedTotal;
             _allocatedInCalls = 0;
             _allocatedByState.Clear();
+            if (_isCountingDefaults && _defaultByName.Count > 0 && (int)_time % 10 == 0)
+                GD.Print("[Ai] unimplemented externals: " + string.Join(", ",
+                    _defaultByName.OrderByDescending(d => d.Value).Take(25).Select(d => $"{d.Key} {d.Value}")));
             if (_missingAnis.Count > 0 && _time < 12)
                 GD.Print("[Ai] animations not found: " + string.Join(", ",
                     _missingAnis.OrderByDescending(m => m.Value).Take(12).Select(m => $"{m.Key} x{m.Value}")));
@@ -554,6 +597,53 @@ namespace GothicGodot.Spike
                     else if (isState)
                         npc.Current = null;
                     break;
+                case GothicNpc.GotoFpAction goFp:
+                    var point = FindFreePoint(npc, goFp.Name, float.MaxValue, goFp.IsNext);
+                    if (point == null)
+                    {
+                        npc.Current = null;
+                        break;
+                    }
+
+                    // Free the old point, hold the new one (else roaming NPCs run out of free points).
+                    if (npc.CurrentFreePoint != null && npc.CurrentFreePoint != point)
+                        npc.CurrentFreePoint.Occupant = null;
+                    point.Occupant = npc;
+                    npc.CurrentFreePoint = point;
+                    npc.Path.Clear();
+                    npc.Path.AddRange(FindPathTo(npc.Position, point.Position));
+                    PlayClip(npc, npc.WalkClip, true);
+                    break;
+                case GothicNpc.TurnAction turn:
+                    var facing = turn.Target != null
+                        ? turn.Target.Position - npc.Position
+                        : npc.CurrentFreePoint?.Direction ?? Vector3.Zero;
+                    facing.Y = 0;
+                    if (facing.LengthSquared() > 0.0001f)
+                        npc.Root.Rotation = new Vector3(0, Mathf.Atan2(-facing.X, -facing.Z), 0);
+                    npc.Current = null;
+                    break;
+                case GothicNpc.SpeakAction speak:
+                    // Like Gothic-Unity's OutputSvm: SVM_<voice>_<key> names the WAV (and the OU.BIN subtitle). Only
+                    // NPCs in hearing range load and play it; decoding runs off the main thread.
+                    if (npc.Root?.Visible != true || Sfx == null || npc.Position.DistanceTo(HeroPosition) > _hearingRange)
+                    {
+                        npc.Current = null;
+                        break;
+                    }
+
+                    Audio.GothicSound.LoadAsync(_vfs, speak.Name, voice =>
+                    {
+                        speak.IsLoaded = true;
+                        speak.Seconds = voice?.GetLength() ?? 0;
+                        if (voice == null || npc.Root == null)
+                            return;
+                        Sfx.PlayVoice(voice, npc.Position + Vector3.Up * 1.6f);
+                        _spoken++;
+                    });
+                    if (speak.IsOverlay)
+                        npc.Current = null;
+                    break;
                 case GothicNpc.GotoAction go:
                     npc.Path.Clear();
                     npc.Path.AddRange(FindPath(npc.Position, go.Waypoint));
@@ -578,6 +668,11 @@ namespace GothicGodot.Spike
                     if (npc.ActionTime >= wait.Seconds)
                         npc.Current = null;
                     break;
+                case GothicNpc.SpeakAction speak:
+                    // Waits for the line (and for its decoding, at most a second).
+                    if (speak.IsLoaded ? npc.ActionTime >= speak.Seconds : npc.ActionTime > 1.0)
+                        npc.Current = null;
+                    break;
                 case GothicNpc.PlayAniAction:
                     if (!npc.IsClipLooping && npc.ClipTime * npc.Clip.Fps >= npc.Clip.FrameCount - 1)
                     {
@@ -585,7 +680,7 @@ namespace GothicGodot.Spike
                         PlayClip(npc, npc.Clip.Next ?? npc.IdleClip, true);
                     }
                     break;
-                case GothicNpc.GotoAction:
+                case GothicNpc.GotoAction or GothicNpc.GotoFpAction:
                     var step = (float)(delta * _walkSpeed);
                     while (step > 0 && npc.Path.Count > 0)
                     {
@@ -661,6 +756,17 @@ namespace GothicGodot.Spike
             return result;
         }
 
+        /// <summary>Over the waynet to the waypoint nearest the place, then straight to it (freepoints lie off the net).</summary>
+        private List<Vector3> FindPathTo(Vector3 from, Vector3 to)
+        {
+            var last = NearestWaypoint(to);
+            var path = last != null && _waypoints[last].DistanceTo(to) < from.DistanceTo(to)
+                ? FindPath(from, last)
+                : new List<Vector3>();
+            path.Add(to);
+            return path;
+        }
+
         private string NearestWaypoint(Vector3 position)
         {
             string best = null;
@@ -734,6 +840,11 @@ namespace GothicGodot.Spike
 
         private int? _consumableFlags;
         private int _heroChangesLogged;
+        private long _spoken;
+        private int _svmCalls;
+        private const float _hearingRange = 30f;
+        private readonly Dictionary<string, int> _defaultByName = new();
+        private bool _isCountingDefaults = OS.GetCmdlineUserArgs().Contains("--count-externals");
         private string _currentCall;
 
         /// <summary>A script constant (e.g. NPC_TALENT_PICKLOCK), or the fallback if the scripts have none.</summary>
@@ -808,9 +919,45 @@ namespace GothicGodot.Spike
 
         private GothicNpc Npc(DaedalusInstance instance) => instance?.UserData as GothicNpc;
 
+        private int DetectNpc(NpcInstance npc, int instance, int state, int guild, bool isPlayerDetected)
+        {
+            _externals++;
+            if (Npc(npc) is not { Root: not null } self)
+                return 0;
+            var range = npc.SensesRange / 100f;
+            GothicNpc best = null;
+            var bestDistance = range;
+            // No LINQ: called by many states every loop, it must not make garbage.
+            for (var i = 0; i <= _npcs.Count; i++)
+            {
+                var other = i < _npcs.Count ? _npcs[i] : _hero;
+                if (other == self || other?.Root == null || other.Instance == null)
+                    continue;
+                if (!isPlayerDetected && other == _hero || instance >= 0 && other.Instance.Index != instance)
+                    continue;
+                if (state >= 0 && other.StateMain != state || guild >= 0 && other.Instance.Guild != guild)
+                    continue;
+                var distance = other.Position.DistanceTo(self.Position);
+                if (distance >= bestDistance)
+                    continue;
+                best = other;
+                bestDistance = distance;
+            }
+
+            if (best == null)
+                return 0;
+            _vm.GlobalOther = best.Instance;
+            return 1;
+        }
+
         private void RegisterExternals()
         {
-            _vm.RegisterExternalDefault((_, _) => _defaultExternals++);
+            _vm.RegisterExternalDefault((_, symbol) =>
+            {
+                _defaultExternals++;
+                if (_isCountingDefaults)
+                    _defaultByName[symbol.Name] = _defaultByName.GetValueOrDefault(symbol.Name) + 1;
+            });
 
             _vm.RegisterExternal("Wld_InsertNpc", (DaedalusVm.ExternalFuncV<int, string>)((instance, waypoint) =>
             {
@@ -957,6 +1104,76 @@ namespace GothicGodot.Spike
                     GD.Print($"[Ai] hero attribute {(NpcAttribute)attribute} {value:+#;-#;0} -> {newValue} in {_currentCall ?? "-"}");
                 npc.SetAttribute((NpcAttribute)attribute, newValue);
             }));
+            // Freepoints (Gothic-Unity's rules: looked up within 7 m, held while an NPC walks to or stands on one).
+            _vm.RegisterExternal("Wld_IsFPAvailable", (DaedalusVm.ExternalFunc<int, NpcInstance, string>)((npc, name) =>
+            {
+                _externals++;
+                return Npc(npc) is { Root: not null } target && FindFreePoint(target, name, _freePointLookup, false) != null
+                    ? 1
+                    : 0;
+            }));
+            _vm.RegisterExternal("Wld_IsNextFPAvailable", (DaedalusVm.ExternalFunc<int, NpcInstance, string>)((npc, name) =>
+            {
+                _externals++;
+                return Npc(npc) is { Root: not null } target && FindFreePoint(target, name, _freePointLookup, true) != null
+                    ? 1
+                    : 0;
+            }));
+            _vm.RegisterExternal("Npc_IsOnFP", (DaedalusVm.ExternalFunc<int, NpcInstance, string>)((npc, name) =>
+            {
+                _externals++;
+                var point = Npc(npc)?.CurrentFreePoint;
+                return point != null && point.Name.IndexOf(name, StringComparison.OrdinalIgnoreCase) >= 0 &&
+                       point.Position.DistanceTo(Npc(npc).Position) < 1f
+                    ? 1
+                    : 0;
+            }));
+            _vm.RegisterExternal("AI_GotoFP", (DaedalusVm.ExternalFuncV<NpcInstance, string>)((npc, name) =>
+            {
+                _externals++;
+                Npc(npc)?.Actions.Enqueue(new GothicNpc.GotoFpAction { Name = name });
+            }));
+            if (_vm.GetSymbolByName("AI_GotoNextFP") != null)
+                _vm.RegisterExternal("AI_GotoNextFP", (DaedalusVm.ExternalFuncV<NpcInstance, string>)((npc, name) =>
+                {
+                    _externals++;
+                    Npc(npc)?.Actions.Enqueue(new GothicNpc.GotoFpAction { Name = name, IsNext = true });
+                }));
+            _vm.RegisterExternal("AI_AlignToFP", (DaedalusVm.ExternalFuncV<NpcInstance>)(npc =>
+            {
+                _externals++;
+                Npc(npc)?.Actions.Enqueue(new GothicNpc.TurnAction());
+            }));
+            _vm.RegisterExternal("AI_TurnToNpc", (DaedalusVm.ExternalFuncV<NpcInstance, NpcInstance>)((npc, other) =>
+            {
+                _externals++;
+                if (Npc(other) is { Root: not null } target)
+                    Npc(npc)?.Actions.Enqueue(new GothicNpc.TurnAction { Target = target });
+            }));
+            // Another NPC (or the hero) within the senses range by instance, AI state and guild (-1: any); becomes other.
+            _vm.RegisterExternal("Wld_DetectNpc", (DaedalusVm.ExternalFunc<int, NpcInstance, int, int, int>)(
+                (npc, instance, state, guild) => DetectNpc(npc, instance, state, guild, true)));
+            if (_vm.GetSymbolByName("Wld_DetectNpcEx") != null)
+                _vm.RegisterExternal("Wld_DetectNpcEx", (DaedalusVm.ExternalFunc<int, NpcInstance, int, int, int, int>)(
+                    (npc, instance, state, guild, player) => DetectNpc(npc, instance, state, guild, player != 0)));
+
+            // The voices' standard lines: greetings, smalltalk, warnings (SVM_<voice>_<key>).
+            foreach (var (external, isOverlay) in new[] { ("AI_OutputSVM", false), ("AI_OutputSVM_Overlay", true) })
+            {
+                if (_vm.GetSymbolByName(external) == null)
+                    continue;
+                _vm.RegisterExternal(external, (DaedalusVm.ExternalFuncV<NpcInstance, NpcInstance, string>)((self, target, key) =>
+                {
+                    _externals++;
+                    if (Npc(self) is not { } speaker || speaker == _hero || string.IsNullOrEmpty(key))
+                        return;
+                    speaker.Actions.Enqueue(new GothicNpc.SpeakAction
+                    {
+                        Name = $"SVM_{self.Voice}_{key.TrimStart('$')}", IsOverlay = isOverlay
+                    });
+                }));
+            }
+
             _vm.RegisterExternal("Snd_Play", (DaedalusVm.ExternalFuncV<string>)(name =>
             {
                 _externals++;

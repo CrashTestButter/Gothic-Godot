@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Threading.Tasks;
 using Gothic.Core.Domain.Audio;
 using Godot;
 using ZenKit;
@@ -9,7 +10,8 @@ namespace GothicGodot.Audio
 {
     /// <summary>
     /// Gothic's WAV files (sounds, speech) as Godot streams: PCM as it is, IMA ADPCM (most speech) decoded with
-    /// Gothic-Unity's ImaadpcmDecoderDomain from the shared core. Streams are cached by name.
+    /// Gothic-Unity's ImaadpcmDecoderDomain from the shared core. Streams are cached by name. <see cref="LoadAsync"/>
+    /// decodes on a worker thread (the VFS read stays on the main thread), like Gothic-Unity's sounds since #461.
     /// </summary>
     public static class GothicSound
     {
@@ -17,6 +19,70 @@ namespace GothicGodot.Audio
         private const int _formatImaAdpcm = 0x11;
 
         private static readonly Dictionary<string, AudioStreamWav> _cache = new(StringComparer.OrdinalIgnoreCase);
+        private static readonly Dictionary<string, List<Action<AudioStreamWav>>> _pending =
+            new(StringComparer.OrdinalIgnoreCase);
+
+        private class Decoded
+        {
+            public byte[] Data;
+            public int Bits;
+            public int SampleRate;
+            public int Channels;
+        }
+
+        /// <summary>
+        /// The stream for the callback, at once when cached, else after decoding on a worker thread (the callback runs
+        /// on the main thread then; null if the sound doesn't exist or can't be decoded).
+        /// </summary>
+        public static void LoadAsync(Vfs vfs, string name, Action<AudioStreamWav> ready)
+        {
+            var key = Path.GetFileNameWithoutExtension(name).ToUpperInvariant();
+            if (_cache.TryGetValue(key, out var cached))
+            {
+                ready(cached);
+                return;
+            }
+
+            if (_pending.TryGetValue(key, out var waiting))
+            {
+                waiting.Add(ready);
+                return;
+            }
+
+            var bytes = vfs.Find($"{key}.WAV")?.Buffer.Bytes;
+            if (bytes == null)
+            {
+                _cache[key] = null;
+                ready(null);
+                return;
+            }
+
+            _pending[key] = new List<Action<AudioStreamWav>> { ready };
+            Task.Run(() =>
+            {
+                Decoded decoded = null;
+                try
+                {
+                    decoded = Decode(bytes);
+                }
+                catch (Exception e)
+                {
+                    GD.PushWarning($"[Sound] {key}.WAV can't be decoded: {e.Message}");
+                }
+
+                Callable.From(() => Finish(key, decoded)).CallDeferred();
+            });
+        }
+
+        private static void Finish(string key, Decoded decoded)
+        {
+            var stream = decoded != null ? ToStream(decoded) : null;
+            _cache[key] = stream;
+            if (!_pending.Remove(key, out var callbacks))
+                return;
+            foreach (var callback in callbacks)
+                callback(stream);
+        }
 
         public static AudioStreamWav Load(Vfs vfs, string name)
         {
@@ -42,7 +108,18 @@ namespace GothicGodot.Audio
             return stream;
         }
 
-        private static AudioStreamWav FromWav(byte[] bytes)
+        private static AudioStreamWav FromWav(byte[] bytes) => ToStream(Decode(bytes));
+
+        private static AudioStreamWav ToStream(Decoded decoded) => new()
+        {
+            Format = decoded.Bits == 8 ? AudioStreamWav.FormatEnum.Format8Bits : AudioStreamWav.FormatEnum.Format16Bits,
+            MixRate = decoded.SampleRate,
+            Stereo = decoded.Channels == 2,
+            Data = decoded.Data
+        };
+
+        /// <summary>WAV bytes to Godot's PCM layout; plain C#, safe on any thread.</summary>
+        private static Decoded Decode(byte[] bytes)
         {
             var format = ReadFormat(bytes, out var channels, out var sampleRate, out var bits, out var dataOffset,
                 out var dataLength);
@@ -64,13 +141,7 @@ namespace GothicGodot.Audio
                     data[i] = (byte)(data[i] - 128);
             }
 
-            return new AudioStreamWav
-            {
-                Format = bits == 8 ? AudioStreamWav.FormatEnum.Format8Bits : AudioStreamWav.FormatEnum.Format16Bits,
-                MixRate = sampleRate,
-                Stereo = channels == 2,
-                Data = data
-            };
+            return new Decoded { Data = data, Bits = bits, SampleRate = sampleRate, Channels = channels };
         }
 
         private static int ReadFormat(byte[] bytes, out int channels, out int sampleRate, out int bits,

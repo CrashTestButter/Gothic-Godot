@@ -46,6 +46,37 @@ namespace GothicGodot.Spike
             public string Waypoint;
         }
 
+        /// <summary>A freepoint (zCVobSpot, e.g. FP_SMALLTALK_OC_01): a place to stand, sit or talk, one NPC at a time.</summary>
+        public class FreePoint
+        {
+            public string Name;
+            public Vector3 Position;
+            public Vector3 Direction;
+            public GothicNpc Occupant;
+        }
+
+        /// <summary>AI_GotoFP / AI_GotoNextFP: walk to the nearest free point of that name.</summary>
+        public class GotoFpAction : Action
+        {
+            public string Name;
+            public bool IsNext;
+        }
+
+        /// <summary>AI_AlignToFP, AI_TurnToNpc: face the freepoint's direction or another NPC.</summary>
+        public class TurnAction : Action
+        {
+            public GothicNpc Target;
+        }
+
+        /// <summary>AI_OutputSVM: one of the voice's standard lines; an overlay doesn't hold the queue.</summary>
+        public class SpeakAction : Action
+        {
+            public string Name;
+            public bool IsOverlay;
+            public double Seconds;
+            public bool IsLoaded;
+        }
+
         public NpcInstance Instance;
         public string SymbolName;
         public string Name;
@@ -88,6 +119,7 @@ namespace GothicGodot.Spike
         public Action Current;
         public double ActionTime;
         public readonly List<Vector3> Path = new();
+        public FreePoint CurrentFreePoint;
 
         /// <summary>In a dialog with the hero: AI and routine wait, the dialog plays the animations.</summary>
         public bool IsInDialog;
