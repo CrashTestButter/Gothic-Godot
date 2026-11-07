@@ -95,7 +95,7 @@ namespace GothicGodot.Spike
                 var vobs = new VobBuilder(vfs, textures, groundLight)
                 {
                     SeparateItems = _args.Get("items", "true") == "true",
-                    SeparateContainers = _args.Get("chests", "true") == "true"
+                    SeparateMobs = _args.Get("mobs", "true") == "true"
                 };
                 if (vobMode == "nodes")
                 {
@@ -294,7 +294,7 @@ namespace GothicGodot.Spike
             Log($"items built in {watch.ElapsedMilliseconds} ms: {_vobs.ItemsBuilt} of {_vobs.ItemCount} grabbable");
         }
 
-        private readonly List<GothicGodot.Interaction.WorldChest> _chests = new();
+        private readonly List<GothicGodot.Interaction.WorldMob> _chests = new();
 
         /// <summary>
         /// The chests as animated models with their contents. Every item that can show up later (chest contents, what
@@ -306,7 +306,7 @@ namespace GothicGodot.Spike
             var root = new Node3D { Name = "Chests" };
             AddChild(root);
             var itemRoot = GetNode<Node3D>("Items");
-            foreach (var (vob, model, transform) in _vobs.Containers)
+            foreach (var (vob, model, transform) in _vobs.Mobs)
             {
                 if (!factories.TryGetValue(model, out var factory))
                 {
@@ -324,21 +324,28 @@ namespace GothicGodot.Spike
 
                 if (factory == null)
                     continue;
-                var chest = new GothicGodot.Interaction.WorldChest
+                var chest = new GothicGodot.Interaction.WorldMob
                 {
                     Name = $"{(string.IsNullOrEmpty(vob.Name) ? model : vob.Name)}_{_chests.Count}"
                 };
                 root.AddChild(chest);
                 chest.Transform = transform;
-                var isLocked = vob.IsLocked && (!string.IsNullOrEmpty(vob.Key) || !string.IsNullOrEmpty(vob.PickString));
-                if (!chest.Setup(factory, vob.Contents ?? "", isLocked, _vobs.LightAt(transform.Origin), CreateItem, itemRoot))
+                var (isLockedFlag, key, pick, contents) = vob switch
+                {
+                    ZenKit.Vobs.IContainer c => (c.IsLocked, c.Key, c.PickString, c.Contents ?? ""),
+                    ZenKit.Vobs.IDoor d => (d.IsLocked, d.Key, d.PickString, ""),
+                    _ => (false, null, null, "")
+                };
+                var isLocked = isLockedFlag && (!string.IsNullOrEmpty(key) || !string.IsNullOrEmpty(pick));
+                if (!chest.Setup(factory, contents, isLocked, _vobs.LightAt(transform.Origin), CreateItem, itemRoot,
+                        vob is ZenKit.Vobs.IDoor))
                 {
                     chest.QueueFree();
                     continue;
                 }
 
                 _chests.Add(chest);
-                foreach (var entry in Gothic.Core.Extensions.ContentItemExtension.UnpackItems(vob.Contents ?? ""))
+                foreach (var entry in Gothic.Core.Extensions.ContentItemExtension.UnpackItems(contents))
                     _vobs.Preload(ItemInfo(entry.Name.Trim())?.Visual);
             }
 
@@ -346,11 +353,11 @@ namespace GothicGodot.Spike
                 foreach (var npc in _ai.Npcs.Append(_ai.Hero))
                     foreach (var instance in npc.Inventory.Items)
                         _vobs.Preload(ItemInfo(instance)?.Visual);
-            Log($"chests built in {watch.ElapsedMilliseconds} ms: {_chests.Count} of {_vobs.Containers.Count} " +
-                $"({_chests.Count(c => c.IsLocked)} locked)");
+            Log($"chests and doors built in {watch.ElapsedMilliseconds} ms: {_chests.Count(c => !c.IsDoor)} chests, " +
+                $"{_chests.Count(c => c.IsDoor)} doors of {_vobs.Mobs.Count} ({_chests.Count(c => c.IsLocked)} locked)");
         }
 
-        public IReadOnlyList<GothicGodot.Interaction.WorldChest> Chests => _chests;
+        public IReadOnlyList<GothicGodot.Interaction.WorldMob> Chests => _chests;
 
         /// <summary>The script instance of an item by name (C_ITEM), cached.</summary>
         public Func<string, ZenKit.Daedalus.ItemInstance> ItemInfo { get; private set; }
@@ -712,9 +719,16 @@ namespace GothicGodot.Spike
 
             if (_chests.Count > 0)
             {
-                var opener = new GothicGodot.Interaction.ChestOpener { Name = "ChestOpener" };
+                var opener = new GothicGodot.Interaction.MobOpener { Name = "MobOpener" };
                 AddChild(opener);
                 opener.Init(player, _chests, () => _ai?.Dialog?.IsActive != true && dialogPanel?.HasTarget != true);
+                if (_args.Get("door-test", "false") == "true")
+                {
+                    var doorTest = new GothicGodot.Interaction.DoorTest { Name = "DoorTest" };
+                    AddChild(doorTest);
+                    doorTest.Init(player, _chests, _args.Screenshot);
+                }
+
                 if (_args.Get("chest-test", "false") == "true")
                 {
                     var test = new GothicGodot.Interaction.ChestTest { Name = "ChestTest" };

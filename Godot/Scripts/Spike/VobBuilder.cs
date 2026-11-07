@@ -33,10 +33,10 @@ namespace GothicGodot.Spike
         /// <summary>Items (oCItem) are left out of the merged cells and collected for <see cref="BuildItems"/>.</summary>
         public bool SeparateItems { get; set; }
 
-        /// <summary>Chests (oCMobContainer with a model script) are left out of the cells for <see cref="Containers"/>.</summary>
-        public bool SeparateContainers { get; set; }
+        /// <summary>Chests and doors (oCMobContainer, oCMobDoor with a model script) stay out of the cells for <see cref="Mobs"/>.</summary>
+        public bool SeparateMobs { get; set; }
 
-        public List<(IContainer Vob, string Model, Transform3D Transform)> Containers { get; } = new();
+        public List<(IInteractiveObject Vob, string Model, Transform3D Transform)> Mobs { get; } = new();
         public int ItemCount => _items.Count;
         public TextureArrayBuilder Textures => _textures;
         public int ItemsBuilt { get; private set; }
@@ -166,10 +166,10 @@ namespace GothicGodot.Spike
                     _items.Add((item, visual,
                         new Transform3D(ToGodot(vob.Rotation), WorldChunkBuilder.ToGodot(vob.Position))));
                 }
-                else if (SeparateContainers && vob is IContainer container &&
+                else if (SeparateMobs && vob is IContainer or IDoor &&
                          visual?.EndsWith(".MDS", StringComparison.OrdinalIgnoreCase) == true)
                 {
-                    Containers.Add((container, System.IO.Path.GetFileNameWithoutExtension(visual).ToUpperInvariant(),
+                    Mobs.Add(((IInteractiveObject)vob, System.IO.Path.GetFileNameWithoutExtension(visual).ToUpperInvariant(),
                         new Transform3D(ToGodot(vob.Rotation), WorldChunkBuilder.ToGodot(vob.Position))));
                 }
                 else if (vob.ShowVisual && !string.IsNullOrEmpty(visual) && IsMeshVisual(visual))

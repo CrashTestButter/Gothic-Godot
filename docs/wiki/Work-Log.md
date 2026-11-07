@@ -2,6 +2,14 @@
 
 Newest first.
 
+## 2026-11-07 - Doors
+
+- Doors (oCMobDoor) are animated mobs like the chests (one class for both now): closed S_S0, opening T_S0_2_S1, open S_S1. A closed door's box blocks the player; it lets him through as soon as it starts to open and blocks again when it starts to close.
+- XR: the grip with an empty hand anywhere on the door; desktop: F at a door in front.
+- Old Camp: 42 doors (with the chests 207 of 291 mobs locked); Khorinis 27 animated doors.
+- `--door-test=true`: stands in front of the nearest unlocked door, walks into it (G1 0.75 m, G2 0.83 m, then blocked), opens it, walks through (3.0 m, 2.8 m).
+- Not in it yet: lock picking and keys, NPCs opening doors on their way, the hero's door animations, other mobs (beds, benches, cauldrons, levers).
+
 ## 2026-11-07 - Fix: G2's hero started dead
 
 - The G2 hero showed 0 of 40 hit points. Cause: the spike created the startup script's NPCs only after the script had run, so its `Hlp_GetNpc` + `Npc_ChangeAttribute(npc, ATR_HITPOINTS, -max)` (three NPCs Gothic 2 starts dead) found no NPC, and `Hlp_GetNpc` fell back to the hero.

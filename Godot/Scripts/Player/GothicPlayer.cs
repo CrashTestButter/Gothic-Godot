@@ -285,8 +285,17 @@ namespace GothicGodot.Player
             _shape.Position = new Vector3(0, capsule.Height * 0.5f, 0);
         }
 
+        /// <summary>Tests: move input instead of the stick / keys (x right, y back like the stick).</summary>
+        public Vector2? ForcedMove { get; set; }
+
         private Vector2 GetMoveInput(float dt, out bool isRunning)
         {
+            if (ForcedMove is { } forced)
+            {
+                isRunning = false;
+                return forced;
+            }
+
             isRunning = false;
             if (_walkTestSeconds > 0)
                 return _walkTestTime < _walkTestSeconds ? new Vector2(0, -1) : Vector2.Zero;

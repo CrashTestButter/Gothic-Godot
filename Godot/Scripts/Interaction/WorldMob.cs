@@ -7,11 +7,12 @@ using GothicGodot.Spike;
 namespace GothicGodot.Interaction
 {
     /// <summary>
-    /// A chest (oCMobContainer): its own animated model, closed (S_S0), opening (T_S0_2_S1), open (S_S1) and closing
-    /// (T_S1_2_S0). The first opening lays its contents (the ZEN's "ITMINUGGET:20;ITFO_APPLE" list) inside as items the
-    /// hands can take. Locked chests (key or lock combination) stay shut for now.
+    /// A chest (oCMobContainer) or a door (oCMobDoor): its own animated model, closed (S_S0), opening (T_S0_2_S1), open
+    /// (S_S1) and closing (T_S1_2_S0). A chest's first opening lays its contents (the ZEN's "ITMINUGGET:20;ITFO_APPLE"
+    /// list) inside as items the hands can take; an open door lets the player through. Locked ones (key or lock
+    /// combination) stay shut for now.
     /// </summary>
-    public partial class WorldChest : Node3D
+    public partial class WorldMob : Node3D
     {
         private ModelFactory _factory;
         private Skeleton3D _skeleton;
@@ -23,12 +24,24 @@ namespace GothicGodot.Interaction
         private Aabb _bounds;
         private Func<string, Transform3D, WorldItem> _createItem;
         private Node3D _itemParent;
+        private CollisionShape3D _collider;
 
         public string Model => _factory?.Model;
         public bool IsLocked { get; private set; }
         public bool IsOpen { get; private set; }
         public bool IsMoving => _clip != null && !_isClipLooping;
         public bool HasContents => !string.IsNullOrWhiteSpace(_contents);
+        public bool IsDoor { get; private set; }
+
+        /// <summary>The nearest point of the closed mob's box (a hand on a door or a lid).</summary>
+        public Vector3 ClosestPoint(Vector3 position)
+        {
+            var local = GlobalTransform.AffineInverse() * position;
+            var clamped = new Vector3(Mathf.Clamp(local.X, _bounds.Position.X, _bounds.End.X),
+                Mathf.Clamp(local.Y, _bounds.Position.Y, _bounds.End.Y),
+                Mathf.Clamp(local.Z, _bounds.Position.Z, _bounds.End.Z));
+            return GlobalTransform * clamped;
+        }
         public List<WorldItem> Items { get; } = new();
 
         /// <summary>Where a hand opens it: the middle of the lid, so it works from any side.</summary>
@@ -37,8 +50,9 @@ namespace GothicGodot.Interaction
         public Vector3 Centre => GlobalTransform * _bounds.GetCenter();
 
         public bool Setup(ModelFactory factory, string contents, bool isLocked, Color tint,
-            Func<string, Transform3D, WorldItem> createItem, Node3D itemParent)
+            Func<string, Transform3D, WorldItem> createItem, Node3D itemParent, bool isDoor = false)
         {
+            IsDoor = isDoor;
             _factory = factory;
             _contents = contents;
             _createItem = createItem;
@@ -55,14 +69,15 @@ namespace GothicGodot.Interaction
             instance.Skeleton = instance.GetPathTo(_skeleton);
             instance.SetInstanceShaderParameter("tint", tint);
 
-            // Solid like the merged chests were (cdStatic): a box around the closed chest.
+            // Solid like the merged mobs were (cdStatic): a box around the closed chest or door.
             _bounds = mesh.GetAabb();
             var body = new StaticBody3D { CollisionLayer = PhysicsLayers.Mobs, CollisionMask = 0 };
-            body.AddChild(new CollisionShape3D
+            _collider = new CollisionShape3D
             {
                 Shape = new BoxShape3D { Size = _bounds.Size * new Vector3(1f, 0.9f, 1f) },
                 Position = _bounds.GetCenter() - new Vector3(0, _bounds.Size.Y * 0.05f, 0)
-            });
+            };
+            body.AddChild(_collider);
             AddChild(body);
             Play("S_S0", true);
             return true;
@@ -75,14 +90,17 @@ namespace GothicGodot.Interaction
                 return false;
             if (IsLocked)
             {
-                GD.Print($"[Chest] {Name} is locked");
+                GD.Print($"[Mob] {Name} is locked");
                 return false;
             }
 
             IsOpen = !IsOpen;
+            // A door lets the player through as soon as it starts to open, and blocks again when it starts to close.
+            if (IsDoor)
+                _collider.SetDeferred(CollisionShape3D.PropertyName.Disabled, IsOpen);
             if (!Play(IsOpen ? "T_S0_2_S1" : "T_S1_2_S0", false))
                 Play(IsOpen ? "S_S1" : "S_S0", true);
-            GD.Print($"[Chest] {Name} {(IsOpen ? "opens" : "closes")}");
+            GD.Print($"[Mob] {Name} {(IsOpen ? "opens" : "closes")}");
             return true;
         }
 
@@ -97,7 +115,7 @@ namespace GothicGodot.Interaction
 
             // The lid is up or down: hold that state; the first time it is up, the contents are there.
             Play(IsOpen ? "S_S1" : "S_S0", true);
-            if (IsOpen && !_isFilled)
+            if (IsOpen && !_isFilled && !IsDoor)
                 Fill();
         }
 
@@ -141,7 +159,7 @@ namespace GothicGodot.Interaction
                 Items.Add(item);
             }
 
-            GD.Print($"[Chest] {Name}: {Items.Count} of {entries.Count} entries laid out ({_contents})");
+            GD.Print($"[Mob] {Name}: {Items.Count} of {entries.Count} entries laid out ({_contents})");
         }
     }
 }

@@ -13,15 +13,15 @@ namespace GothicGodot.Interaction
     public partial class ChestTest : Node
     {
         private GothicPlayer _player;
-        private IReadOnlyList<WorldChest> _chests;
+        private IReadOnlyList<WorldMob> _chests;
         private string _screenshot;
         private InventoryPanel _bag;
         private double _time;
         private int _step;
-        private WorldChest _chest;
+        private WorldMob _chest;
         private WorldItem _item;
 
-        public void Init(GothicPlayer player, IReadOnlyList<WorldChest> chests, string screenshot, InventoryPanel bag)
+        public void Init(GothicPlayer player, IReadOnlyList<WorldMob> chests, string screenshot, InventoryPanel bag)
         {
             _player = player;
             _chests = chests;
@@ -57,7 +57,7 @@ namespace GothicGodot.Interaction
                     Next();
                     break;
                 case 2 when _time > 0.2:
-                    var opener = GetParent().GetNodeOrNull<ChestOpener>("ChestOpener");
+                    var opener = GetParent().GetNodeOrNull<MobOpener>("MobOpener");
                     if (opener?.FindInView() != _chest)
                     {
                         Finish($"the chest in view is {opener?.FindInView()?.Name ?? "none"}", 1);
@@ -116,7 +116,7 @@ namespace GothicGodot.Interaction
         }
 
         /// <summary>A floor about a metre from the chest from where the eyes see its middle.</summary>
-        private bool TryFindSpot(WorldChest chest, out Vector3 spot)
+        private bool TryFindSpot(WorldMob chest, out Vector3 spot)
         {
             var space = _player.GetWorld3D().DirectSpaceState;
             var target = chest.Centre;

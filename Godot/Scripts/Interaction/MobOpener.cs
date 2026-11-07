@@ -6,21 +6,21 @@ using GothicGodot.Player;
 namespace GothicGodot.Interaction
 {
     /// <summary>
-    /// Opens and closes chests: XR - the grip with an empty hand on the lid (no item in reach);
-    /// desktop - F at a chest in front within 2.2 m (when no NPC to talk to is in front).
+    /// Opens and closes chests and doors: XR - the grip with an empty hand on the lid or the door (no item in reach);
+    /// desktop - F at one in front within 2.2 m (when no NPC to talk to is in front).
     /// </summary>
-    public partial class ChestOpener : Node
+    public partial class MobOpener : Node
     {
-        private const float _lidReach = 0.45f;
+        private const float _handReach = 0.25f;
         private const float _desktopReach = 2.2f;
 
         private GothicPlayer _player;
-        private IReadOnlyList<WorldChest> _chests;
+        private IReadOnlyList<WorldMob> _chests;
         private Func<bool> _isAllowed;
         private readonly bool[] _wasGripDown = new bool[2];
         private bool _wasKeyDown;
 
-        public void Init(GothicPlayer player, IReadOnlyList<WorldChest> chests, Func<bool> isAllowed)
+        public void Init(GothicPlayer player, IReadOnlyList<WorldMob> chests, Func<bool> isAllowed)
         {
             _player = player;
             _chests = chests;
@@ -55,11 +55,14 @@ namespace GothicGodot.Interaction
             if (!isPressed || hand.Held != null || hand.IsItemInReach())
                 return;
 
-            WorldChest nearest = null;
-            var best = _lidReach;
+            WorldMob nearest = null;
+            var best = _handReach;
             foreach (var chest in _chests)
             {
-                var distance = chest.LidPoint.DistanceTo(hand.GlobalPosition);
+                // Chests by their lid, doors anywhere on the leaf.
+                var distance = chest.IsDoor
+                    ? chest.ClosestPoint(hand.GlobalPosition).DistanceTo(hand.GlobalPosition)
+                    : chest.LidPoint.DistanceTo(hand.GlobalPosition) - 0.2f;
                 if (distance >= best)
                     continue;
                 nearest = chest;
@@ -70,11 +73,11 @@ namespace GothicGodot.Interaction
         }
 
         /// <summary>The nearest chest in front of the eyes (within about 40° of the view).</summary>
-        public WorldChest FindInView()
+        public WorldMob FindInView()
         {
             var camera = _player.Camera.GlobalTransform;
             var forward = -camera.Basis.Z.Normalized();
-            WorldChest nearest = null;
+            WorldMob nearest = null;
             var best = _desktopReach;
             foreach (var chest in _chests)
             {
