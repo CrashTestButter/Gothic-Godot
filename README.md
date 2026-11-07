@@ -18,10 +18,10 @@ Gothic-Unity depends on one vendor's decisions (licence terms, runtime fees, pla
 
 ## What works so far
 
-Tested on the Linux desktop with headless scripted tests (18 of them, Gothic 1 and 2); the world renders on a Quest 3 at 120 Hz:
+Tested on the Linux desktop with headless scripted tests (20 of them, Gothic 1 and 2); the world renders on a Quest 3 at 120 Hz:
 
 - Gothic 1's Old Camp and Gothic 2's Khorinis: world, objects, particles, Gothic's baked light, time of day with day and night, occlusion culling
-- Scripted NPCs and monsters with their daily routines, AI states, freepoints and smalltalk on Gothic's Daedalus VM
+- All of the world's scripted NPCs and monsters with their daily routines (AI and bodies near the player, like the engine), AI states, freepoints and smalltalk on Gothic's Daedalus VM
 - Dialogs with choices, voices and subtitles; Gothic's DirectMusic score by zone and time of day; sound effects
 - VR player: walking, teleport, the hero's own hands; taking, throwing, eating and drinking items; the bag
 - Chests and doors, keys and lock picks

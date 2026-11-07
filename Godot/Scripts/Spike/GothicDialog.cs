@@ -412,7 +412,7 @@ namespace GothicGodot.Spike
             _vm.RegisterExternal("AI_ProcessInfos", (DaedalusVm.ExternalFuncV<NpcInstance>)(npc =>
             {
                 // The NPC wants to talk (important info): start it when the hero is near.
-                if (npc?.UserData is GothicNpc target && target.Root != null &&
+                if (npc?.UserData is GothicNpc target && target.IsActive &&
                     target.Position.DistanceTo(_ai.HeroPosition) < _processInfosDistance)
                     Callable.From(() => Start(target)).CallDeferred();
             }));

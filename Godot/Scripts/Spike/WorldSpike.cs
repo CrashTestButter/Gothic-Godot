@@ -994,6 +994,12 @@ namespace GothicGodot.Spike
                     AddChild(lockTest);
                     lockTest.Init(player, _chests, opener, locks, bag, _args.Screenshot);
                 }
+                if (_args.Get("presence-test", "false") == "true" && _ai != null)
+                {
+                    var presenceTest = new PresenceTest { Name = "PresenceTest" };
+                    AddChild(presenceTest);
+                    presenceTest.Init(player, _ai, _args.Screenshot);
+                }
                 if (_args.Get("door-test", "false") == "true")
                 {
                     var doorTest = new GothicGodot.Interaction.DoorTest { Name = "DoorTest" };

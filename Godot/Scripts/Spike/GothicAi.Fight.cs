@@ -54,7 +54,7 @@ namespace GothicGodot.Spike
 
         private bool CanSee(GothicNpc self, GothicNpc other, bool isFreeLineOfSight)
         {
-            if (self?.Root == null || other?.Root == null || self == other)
+            if (self?.IsActive != true || other?.IsActive != true || self == other)
                 return false;
             var eyes = self.Position + Vector3.Up * 1.6f;
             var target = other.Position + Vector3.Up * 1.4f;
@@ -108,7 +108,7 @@ namespace GothicGodot.Spike
 
         private void StartAttack(GothicNpc npc, AttackAction attack)
         {
-            if (npc.Target?.Root == null || npc.Target.IsDown)
+            if (npc.Target?.IsActive != true || npc.Target.IsDown)
                 npc.Current = null;
         }
 
@@ -116,7 +116,7 @@ namespace GothicGodot.Spike
         private bool TickAttack(GothicNpc npc, AttackAction attack, double delta)
         {
             var target = npc.Target;
-            if (target?.Root == null || target.IsDown)
+            if (target?.IsActive != true || target.IsDown)
                 return true;
             var toTarget = target.Position - npc.Position;
             toTarget.Y = 0;
