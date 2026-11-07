@@ -2,6 +2,31 @@
 
 Newest first.
 
+## 2026-11-07 - Optimization round 2: world cache, ETC2 textures, draw calls
+
+The world is built once and saved; later starts load it (Gothic-Unity's pre-caching idea, in Godot's own binary scene format). In the cache: the chunk meshes with their collision and occluders, the ground light the objects and NPCs are lit with, and the texture array's layers (decoded, scaled, compressed) with their names. Built every time: NPCs, items, chests and doors, particles, sounds.
+
+| Desktop, load up to the texture upload | no cache | first start (builds and saves) | from the cache |
+|---|---|---|---|
+| G1 Old Camp | 3.6 s | 3.7 s | **1.3 s** |
+| G2 Khorinis | 6.2 s | 7.7 s | **2.8 s** |
+
+- Saving costs 0.6 s (G1) / 1.1 s (G2) once. On disk: 286 MB (G1), 477 MB (G2): the scene 256 MB, the textures 232 MB uncompressed, the ground light 11 MB.
+- From the cache, G2's remaining load: the world file itself 0.3 s, texture layers 0.17 s, ground light 0.15 s, particles 0.14 s, the AI's script instances 0.7 s, items 0.3 s, chests 0.1 s, the chunk scene 0.7 s. The scene is read on a worker thread while the NPCs and items are made (only 0.1 s gained: reading is fast); what is left of it is Jolt building the world's collision (878k triangles in 1132 shapes) when it enters the scene - 0 ms without collision.
+- Next candidate there: add the far collision cells after loading, nearest first with a triangle budget per frame (needs cells split into smaller shapes so no frame hitches; worth it if the Quest's cached load is still long).
+- The screenshots of a built and a cached start are the same (mean pixel difference 0.001).
+- The key holds the game data (archive names, sizes, dates), the world, the build options, the Godot version and this build of the code: any change builds it again, the old cache of that world is deleted then. A texture that wasn't in the cache (an NPC's skin first seen) is added behind the cached layers and saved with them. `--world-cache=false` builds without it, `--world-cache=rebuild` ignores a saved one; `--vob-mode=nodes` doesn't use it.
+- Texture compression is now a one time cost, and it works now: round 1's ETC2 measurement had failed to upload (Godot compresses each texture to RGB or RGBA by its alpha, and an array takes only one format - the array stayed empty). All layers are compressed as RGBA now. ETC2: the first start takes 1.9 s longer on the desktop (compressing), later starts nothing; the cached textures are 58 MB instead of 232 MB, and a side by side screenshot looks the same. The desktop GPU has no ETC2 (Godot unpacks it at upload, video memory stays 667 MB); the Quest takes it as it is, a quarter of the texture memory and bandwidth. ASTC stays too slow to compress on the device (41 s on the desktop). The Quest build uses ETC2 by default.
+- 64 spare layers at the end of the array take textures first seen after loading (filled in place, in the array's format): such surfaces stay on the shared materials instead of a material of their own. Nothing needs them yet in the tests (NPCs only spawn at load so far); they are for rewards and, later, NPCs met far from the start. `--spare-check=LOG_PAPER.TGA` (G1's log page, used nowhere in the world) puts one on a quad after loading: it shows right, uncompressed and in ETC2.
+
+Measured on the way:
+- Draw calls at G2's start view (Quest settings, 431 in all): world and object cells with chests and doors ~330, NPCs 73, particles 14, items 10. Without the particle distance (`--pfx-far=0`) the particles alone are 155, one per emitter; at 40 m they need no batching. Items aren't worth a MultiMesh either.
+- `--alpha-far=40`: alpha tested objects (trees, bushes, fences) end at 40 m instead of the object far distance; Old Camp views 94k -> 83k triangles on average. The desktop GPU doesn't notice; the leaves' overdraw on the Quest's tile based GPU is where it should count ([[Headset-Test]]).
+- `--compress-meshes=true` (Godot's compressed vertex attributes: 16 bit positions per chunk, octahedral normals, half float UVs): video memory 690 -> 609 MB in G2, but the textures of large merged objects get streaks (the UVs lose precision above a few repeats). Stays off.
+- The texture log now splits decoding (617 ms in G2) from building the array (56 ms uncompressed, 1593 ms ETC2).
+
+Both suites pass (18 of 18), the first test of each suite building the cache and the others loading it.
+
 ## 2026-11-07 - Optimization round 1: measured with a profiler
 
 dotnet-trace (sampled thread time, 15 s) on G2 Khorinis with 239 scripted NPCs showed the managed main thread spending its time in engine calls, not in the scripts: reading NPC positions from the scene (`GlobalPosition`, 27%), bone poses (28%, positions for every bone every frame), the frustum check per NPC (8.5%), the nearest waypoint scanning all waypoints (6.6%), the freepoint search (7%); the Daedalus scripts themselves ~7%.

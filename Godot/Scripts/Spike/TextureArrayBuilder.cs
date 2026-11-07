@@ -20,8 +20,25 @@ namespace GothicGodot.Spike
 
         public int LayerCount => _images.Count;
 
-        /// <summary>Layers that are in the built array; later ones (textures first seen after loading) are not.</summary>
+        /// <summary>Time spent decoding textures, and building / uploading the array (load log).</summary>
+        public double DecodeMs { get; private set; }
+        public double BuildMs { get; private set; }
+
+        /// <summary>Layers that are in the built array (spare ones included); later ones beyond the spares are not.</summary>
         public int BuiltLayerCount { get; private set; } = int.MaxValue;
+
+        /// <summary>
+        /// Empty layers at the end of the array for textures first seen after loading (a reward item, later an NPC
+        /// met far from the start): filled in place, so their surfaces stay on the shared materials.
+        /// </summary>
+        public int SpareLayers { get; set; } = 64;
+
+        /// <summary>Spare layers filled after loading.</summary>
+        public int LateLayerCount { get; private set; }
+
+        private Texture2DArray _array;
+        private Image.CompressMode? _mode;
+        private int _nextSpare = int.MaxValue;
 
         private readonly Dictionary<string, ImageTexture> _singles = new(StringComparer.OrdinalIgnoreCase);
 
@@ -74,8 +91,21 @@ namespace GothicGodot.Spike
             }
 
             layer = 0;
+            var started = System.Diagnostics.Stopwatch.GetTimestamp();
             var image = LoadImage(textureName, out hasAlpha);
-            if (image != null)
+            DecodeMs += (System.Diagnostics.Stopwatch.GetTimestamp() - started) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+            if (image != null && _array != null && _nextSpare < BuiltLayerCount)
+            {
+                // After loading: into the next spare layer, in the array's format.
+                layer = _nextSpare++;
+                if (_mode != null)
+                    Compress(image, _mode.Value);
+                _array.UpdateLayer(image, layer);
+                LateLayerCount++;
+                GD.Print($"[Textures] {textureName} came after loading: spare layer {layer}, " +
+                         $"{BuiltLayerCount - _nextSpare} left");
+            }
+            else if (image != null)
             {
                 layer = _images.Count;
                 _images.Add(image);
@@ -96,6 +126,84 @@ namespace GothicGodot.Spike
         /// s3tc (desktop GPUs). Compressed on the CPU at load time, all layers in one format.
         /// </summary>
         public string Compression { get; set; } = "none";
+
+        /// <summary>Where Build saves the layers for the world cache when there are new ones (null: not saved).</summary>
+        public string CachePath { get; set; }
+
+        /// <summary>Time spent reading the cached layers.</summary>
+        public double CacheReadMs { get; private set; }
+
+        private const int _cacheFormat = 1;
+        private int _cachedLayerCount = -1;
+
+        /// <summary>
+        /// The layers of an earlier start, already decoded, scaled and compressed: known names keep their layers, new
+        /// textures are added behind them (and saved with them at Build).
+        /// </summary>
+        public void LoadCache(string path)
+        {
+            var started = System.Diagnostics.Stopwatch.GetTimestamp();
+            using var reader = new System.IO.BinaryReader(System.IO.File.OpenRead(path));
+            if (reader.ReadInt32() != _cacheFormat || reader.ReadInt32() != _sliceSize)
+            {
+                GD.PrintErr($"[Cache] {path} has another format or layer size, textures are decoded");
+                return;
+            }
+
+            var layerCount = reader.ReadInt32();
+            _images.Clear();
+            for (var i = 0; i < layerCount; i++)
+            {
+                var format = (Image.Format)reader.ReadInt32();
+                var hasMipmaps = reader.ReadBoolean();
+                var width = reader.ReadInt32();
+                var height = reader.ReadInt32();
+                var data = reader.ReadBytes(reader.ReadInt32());
+                _images.Add(Image.CreateFromData(width, height, hasMipmaps, format, data));
+            }
+
+            var nameCount = reader.ReadInt32();
+            for (var i = 0; i < nameCount; i++)
+            {
+                var name = reader.ReadString();
+                var layer = reader.ReadInt32();
+                _layers[name] = layer;
+                _hasAlpha[name] = reader.ReadBoolean();
+                if (layer != 0)
+                    continue;
+                MissingCount++;
+                MissingNames.Add(name);
+            }
+
+            _cachedLayerCount = layerCount;
+            CacheReadMs = (System.Diagnostics.Stopwatch.GetTimestamp() - started) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+        }
+
+        private void SaveCache(string path)
+        {
+            using var writer = new System.IO.BinaryWriter(System.IO.File.Create(path));
+            writer.Write(_cacheFormat);
+            writer.Write(_sliceSize);
+            writer.Write(_images.Count);
+            foreach (var image in _images)
+            {
+                writer.Write((int)image.GetFormat());
+                writer.Write(image.HasMipmaps());
+                writer.Write(image.GetWidth());
+                writer.Write(image.GetHeight());
+                var data = image.GetData();
+                writer.Write(data.Length);
+                writer.Write(data);
+            }
+
+            writer.Write(_layers.Count);
+            foreach (var (name, layer) in _layers)
+            {
+                writer.Write(name);
+                writer.Write(layer);
+                writer.Write(_hasAlpha[name]);
+            }
+        }
 
         /// <summary>A texture decoded and scaled to the layer size with mipmaps; null if it can't be read.</summary>
         private Image LoadImage(string textureName, out bool hasAlpha)
@@ -128,10 +236,27 @@ namespace GothicGodot.Spike
             }
         }
 
+        // All layers as RGBA: Compress alone picks RGB or RGBA per image (ETC2_RGB8 / ETC2_RGBA8, DXT1 / DXT5) and an
+        // array takes only one format.
+        private static void Compress(Image image, Image.CompressMode mode) =>
+            image.CompressFromChannels(mode, Image.UsedChannels.Rgba);
+
         public Texture2DArray Build()
         {
-            BuiltLayerCount = _images.Count;
-            var mode = Compression switch
+            var started = System.Diagnostics.Stopwatch.GetTimestamp();
+            try
+            {
+                return BuildArray();
+            }
+            finally
+            {
+                BuildMs = (System.Diagnostics.Stopwatch.GetTimestamp() - started) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+            }
+        }
+
+        private Texture2DArray BuildArray()
+        {
+            var mode = _mode = Compression switch
             {
                 "etc2" => Image.CompressMode.Etc2,
                 "astc" => Image.CompressMode.Astc,
@@ -142,10 +267,24 @@ namespace GothicGodot.Spike
             {
                 foreach (var image in _images)
                     if (!image.IsCompressed())
-                        image.Compress(mode.Value);
+                        Compress(image, mode.Value);
             }
 
-            var array = new Texture2DArray();
+            if (CachePath != null && _images.Count != _cachedLayerCount)
+                SaveCache(CachePath);
+
+            _nextSpare = _images.Count;
+            if (SpareLayers > 0)
+            {
+                var spare = (Image)_images[0].Duplicate();
+                if (mode != null && !spare.IsCompressed())
+                    Compress(spare, mode.Value);
+                for (var i = 0; i < SpareLayers; i++)
+                    _images.Add(spare);
+            }
+
+            BuiltLayerCount = _images.Count;
+            var array = _array = new Texture2DArray();
             array.CreateFromImages(_images);
             // The GPU has them now: the decoded images (G2: ~180 MB) are let go; late textures decode again.
             for (var i = 0; i < _images.Count; i++)

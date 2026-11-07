@@ -16,7 +16,9 @@
 - Headless shots: `Godot/tools/render.sh <width>x<height> <shot.png> -- <spike args>` (gamescope, memory cap, Godot's Dummy audio driver; `AUDIO_DRIVER=PulseAudio` to hear it).
 - Playable: `--player=true --ai=true` (desktop: WASD, mouse, Shift, Q/E, T teleport, F talk / open, right mouse take, B put away, Tab bag, U eat / drink, arrow keys lock picks). `--game=2` for Gothic 2.
 - Scripted tests: `Godot/tools/run-tests.sh [1|2] [dialog grab bag use chest door lock]` runs each one headless and prints PASS / FAIL (`--dialog-test`, `--grab-test=true|bag|use`, `--chest-test`, `--door-test`, `--lock-test`; also `--walk-test=<s>`, `--teleport-test=<s>`).
-- Helpers: `--record-audio=<file.wav>` saves the mix, `--count-externals` lists the scripts' externals the spike lacks, `--shots=%MODEL,<m>` frames the first NPC of a model, `--open-chests=true`, `--hand-preview=true`.
+- World cache: the built world (chunk meshes, collision, occluders, ground light, texture layers) is saved to `user://world-cache` on the first start and loaded on the next ones (Linux: `~/.local/share/godot/app_userdata/Gothic-Godot/world-cache`, 0.3-0.5 GB per world). Rebuilt by itself when the game data, the world, the build options or the code change. `--world-cache=false` builds without it, `--world-cache=rebuild` builds and saves again.
+- Load and GPU options: `--object-far=<m>` (objects in their own cells, hidden beyond), `--alpha-far=<m>` (trees and bushes hidden earlier), `--texture-compression=none|etc2|astc|s3tc` (default ETC2 on the Quest, none on the desktop), `--compress-meshes=true` (less video memory, texture streaks on big objects), `--occluder-area=<m²>` (occlusion culling).
+- Helpers: `--record-audio=<file.wav>` saves the mix, `--count-externals` lists the scripts' externals the spike lacks, `--shots=%MODEL,<m>` frames the first NPC of a model, `--open-chests=true`, `--hand-preview=true`, `--spare-check=<TEXTURE.TGA>` (a texture asked for after loading, on a quad in front of the camera: the texture array's spare layers), `--preload-items=false` (carried and chest items get their textures when they show up).
 
 ## The wonderbranch
 
