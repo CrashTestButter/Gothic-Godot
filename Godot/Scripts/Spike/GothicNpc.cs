@@ -101,6 +101,9 @@ namespace GothicGodot.Spike
 
         // Animation
         public ModelFactory.Clip Clip;
+
+        /// <summary>The clip whose full pose is on the skeleton (then only its moving bones are written).</summary>
+        public ModelFactory.Clip AppliedClip;
         public double ClipTime;
         public bool IsClipLooping = true;
 
@@ -147,6 +150,87 @@ namespace GothicGodot.Spike
         public int Attitude = -1;
         public int TempAttitude = -1;
 
-        public Vector3 Position => Root.GlobalPosition;
+        private Vector3 _position;
+
+        /// <summary>
+        /// Where it stands, kept here: the AI moves NPCs itself, and reading the scene's GlobalPosition (an engine call)
+        /// was a quarter of the AI's managed time in Khorinis. The hero's is synced from the player once per frame.
+        /// </summary>
+        public Vector3 Position => _position;
+
+        /// <summary>Shown (in animation range); kept here for the same reason.</summary>
+        public bool IsShown { get; private set; } = true;
+
+        private bool _isPositionDirty;
+
+        /// <summary>
+        /// Hidden NPCs only remember where they are; the scene node moves when they are shown again (moving nodes was
+        /// the next biggest cost). The AI node sits at the origin, so the local position is the world position.
+        /// </summary>
+        public void SetPosition(Vector3 position)
+        {
+            _position = position;
+            if (!IsShown)
+            {
+                _isPositionDirty = true;
+                return;
+            }
+
+            Root.Position = position;
+        }
+
+        public void SyncPosition()
+        {
+            if (Root != null)
+                _position = Root.GlobalPosition;
+        }
+
+        private float _yaw;
+        private bool _isYawDirty;
+
+        /// <summary>Its facing (radians around up, 0 = -Z), kept like the position.</summary>
+        public float Yaw => _yaw;
+        public Vector3 Forward => new(-Mathf.Sin(_yaw), 0, -Mathf.Cos(_yaw));
+
+        public void SetYaw(float yaw)
+        {
+            if (Mathf.Abs(yaw - _yaw) < 0.0001f && !_isYawDirty)
+                return;
+            _yaw = yaw;
+            if (!IsShown)
+            {
+                _isYawDirty = true;
+                return;
+            }
+
+            Root.Rotation = new Vector3(0, yaw, 0);
+            _isYawDirty = false;
+        }
+
+        /// <summary>Turns it to look along the direction (ignoring up and down).</summary>
+        public void FaceTowards(Vector3 direction)
+        {
+            if (direction.X * direction.X + direction.Z * direction.Z > 1e-6f)
+                SetYaw(Mathf.Atan2(-direction.X, -direction.Z));
+        }
+
+        public void SetShown(bool isShown)
+        {
+            if (IsShown == isShown)
+                return;
+            IsShown = isShown;
+            Root.Visible = isShown;
+            if (isShown && _isPositionDirty)
+            {
+                Root.Position = _position;
+                _isPositionDirty = false;
+            }
+
+            if (isShown && _isYawDirty)
+            {
+                Root.Rotation = new Vector3(0, _yaw, 0);
+                _isYawDirty = false;
+            }
+        }
     }
 }

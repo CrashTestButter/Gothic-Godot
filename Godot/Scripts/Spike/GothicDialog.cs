@@ -324,7 +324,7 @@ namespace GothicGodot.Spike
             var toHero = _ai.HeroPosition - npc.Position;
             toHero.Y = 0;
             if (toHero.LengthSquared() > 0.01f)
-                npc.Root.Rotation = new Vector3(0, Mathf.Atan2(-toHero.X, -toHero.Z), 0);
+                npc.FaceTowards(toHero);
             _ai.PlayClip(npc, npc.IdleClip, true);
         }
 

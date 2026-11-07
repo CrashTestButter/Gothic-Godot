@@ -62,7 +62,7 @@ namespace GothicGodot.Spike
                 return false;
             var toTarget = other.Position - self.Position;
             toTarget.Y = 0;
-            var forward = -self.Root.GlobalBasis.Z;
+            var forward = self.Forward;
             forward.Y = 0;
             if (!isFreeLineOfSight && toTarget.LengthSquared() > 0.01f &&
                 Mathf.RadToDeg(forward.AngleTo(toTarget)) > _sightHalfAngle)
@@ -122,7 +122,7 @@ namespace GothicGodot.Spike
             toTarget.Y = 0;
             var distance = toTarget.Length();
             if (distance > 0.01f)
-                npc.Root.Rotation = new Vector3(0, Mathf.Atan2(-toTarget.X, -toTarget.Z), 0);
+                npc.FaceTowards(toTarget);
 
             if (!attack.IsSwinging)
             {
@@ -137,7 +137,7 @@ namespace GothicGodot.Spike
                         next + Vector3.Up, next + Vector3.Down * 2f, Interaction.PhysicsLayers.World));
                     if (ground.Count > 0)
                         next.Y = ground["position"].AsVector3().Y;
-                    npc.Root.GlobalPosition = next;
+                    npc.SetPosition(next);
                     return npc.ActionTime > 0.8;
                 }
 
@@ -153,7 +153,7 @@ namespace GothicGodot.Spike
             if (!attack.IsHitDone && npc.ActionTime >= attack.SwingLength * 0.45)
             {
                 attack.IsHitDone = true;
-                var forward = -npc.Root.GlobalBasis.Z;
+                var forward = npc.Forward;
                 if (distance <= Reach(npc) + 0.4f && (distance < 0.3f || forward.Dot(toTarget / distance) > 0.5f))
                 {
                     var damage = Fight.NpcHits(npc, target);

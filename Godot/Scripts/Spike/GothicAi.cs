@@ -82,7 +82,7 @@ namespace GothicGodot.Spike
         public GothicDialog Dialog { get; private set; }
         public NpcInstance HeroInstance => _hero?.Instance;
         public GothicNpc Hero => _hero;
-        public Vector3 HeroPosition => _hero?.Root != null ? _hero.Root.GlobalPosition : Vector3.Zero;
+        public Vector3 HeroPosition => _hero?.Root != null ? _hero.Position : Vector3.Zero;
 
         /// <summary>The player becomes the hero the NPCs perceive (instead of the fixed hero position).</summary>
         public void SetHero(Node3D player)
@@ -91,6 +91,7 @@ namespace GothicGodot.Spike
                 return;
             _hero.Root.QueueFree();
             _hero.Root = player;
+            _hero.SyncPosition();
         }
 
         public void Init(Vfs vfs, ModelFactory factory, ZenKit.World world, GroundLightSampler light, int hour,
@@ -103,7 +104,14 @@ namespace GothicGodot.Spike
             _minuteOfDay = hour * 60;
 
             foreach (var point in world.WayNet.Points)
-                _waypoints[point.Name] = MeshPart.ToGodot(point.Position);
+            {
+                var position = MeshPart.ToGodot(point.Position);
+                _waypoints[point.Name] = position;
+                var cell = WaypointCell(position);
+                if (!_waypointCells.TryGetValue(cell, out var names))
+                    _waypointCells[cell] = names = new List<(string, Vector3)>();
+                names.Add((point.Name, position));
+            }
             foreach (var vob in world.RootObjects)
                 CollectFreePoints(vob);
             foreach (var edge in world.WayNet.Edges)
@@ -122,6 +130,7 @@ namespace GothicGodot.Spike
             _hero = new GothicNpc { Name = "Hero", Root = new Node3D { Name = "Hero" } };
             AddChild(_hero.Root);
             _hero.Root.GlobalPosition = heroPosition;
+            _hero.SyncPosition();
             var hero = _vm.AllocInstance<NpcInstance>("PC_HERO");
             hero.UserData = _hero;
             _hero.Instance = hero;
@@ -224,41 +233,40 @@ namespace GothicGodot.Spike
         }
 
         /// <summary>The nearest free point whose name contains the part (the NPC's own one counts as free).</summary>
+        /// <summary>
+        /// The nearest free point whose name contains the part (the NPC's own one counts as free), ring by ring over
+        /// the 8 m grid: the 7 m lookups need one ring, AI_GotoFP without a limit stops once no closer point can come.
+        /// </summary>
         private GothicNpc.FreePoint FindFreePoint(GothicNpc npc, string part, float maxDistance, bool isOtherThanCurrent)
         {
             GothicNpc.FreePoint best = null;
             var bestDistance = maxDistance;
-            if (maxDistance < _freePointCell)
+            var (cx, cz) = FreePointCell(npc.Position);
+            var rings = maxDistance < float.MaxValue ? (int)Mathf.Ceil(maxDistance / _freePointCell) : 128;
+            for (var ring = 0; ring <= rings; ring++)
             {
-                var (cx, cz) = FreePointCell(npc.Position);
-                for (var x = cx - 1; x <= cx + 1; x++)
-                for (var z = cz - 1; z <= cz + 1; z++)
+                for (var x = cx - ring; x <= cx + ring; x++)
+                for (var z = cz - ring; z <= cz + ring; z++)
                 {
+                    if (Math.Abs(x - cx) != ring && Math.Abs(z - cz) != ring)
+                        continue;
                     if (!_freePointCells.TryGetValue((x, z), out var cell))
                         continue;
                     foreach (var point in cell)
-                        if (IsFreeFor(point, npc, part, isOtherThanCurrent) && point.Position.DistanceTo(npc.Position) is var d &&
-                            d < bestDistance)
-                        {
-                            best = point;
-                            bestDistance = d;
-                        }
+                    {
+                        if (!IsFreeFor(point, npc, part, isOtherThanCurrent))
+                            continue;
+                        var distance = point.Position.DistanceTo(npc.Position);
+                        if (distance >= bestDistance)
+                            continue;
+                        best = point;
+                        bestDistance = distance;
+                    }
                 }
 
-                return best;
-            }
-
-            foreach (var point in _freePoints)
-            {
-                if (point.Name.IndexOf(part, StringComparison.OrdinalIgnoreCase) < 0)
-                    continue;
-                if (point.Occupant != null && point.Occupant != npc || isOtherThanCurrent && point == npc.CurrentFreePoint)
-                    continue;
-                var distance = point.Position.DistanceTo(npc.Position);
-                if (distance >= bestDistance)
-                    continue;
-                best = point;
-                bestDistance = distance;
+                // Points in the next ring are at least this far away.
+                if (best != null && bestDistance <= ring * _freePointCell)
+                    break;
             }
 
             return best;
@@ -342,9 +350,9 @@ namespace GothicGodot.Spike
             AddChild(npc.Root);
             // Like the engine on world start: at the waypoint of the routine entry that runs now.
             var current = npc.Routine.FirstOrDefault(r => IsActive(r, _minuteOfDay));
-            npc.Root.GlobalPosition = current.Waypoint != null && _waypoints.TryGetValue(current.Waypoint, out var routinePosition)
+            npc.SetPosition(current.Waypoint != null && _waypoints.TryGetValue(current.Waypoint, out var routinePosition)
                 ? routinePosition
-                : _waypoints[waypoint];
+                : _waypoints[waypoint]);
             npc.Skeleton = factory.CreateSkeleton();
             npc.Root.AddChild(npc.Skeleton);
             var tint = _light.Sample(npc.Root.GlobalPosition, new Color(0.6f, 0.6f, 0.6f));
@@ -404,6 +412,7 @@ namespace GothicGodot.Spike
 
             _time += delta;
             _frameWatch.Restart();
+            _hero?.SyncPosition();
             var vmBefore = _vmWatch.Elapsed.TotalMilliseconds;
 
             foreach (var npc in _npcs)
@@ -415,6 +424,16 @@ namespace GothicGodot.Spike
             var aiMs = _frameWatch.Elapsed.TotalMilliseconds;
             _frameWatch.Restart();
             var camera = GetViewport().GetCamera3D();
+            // The view's planes and position once per frame instead of engine calls per NPC.
+            var cameraPosition = Vector3.Zero;
+            if (camera != null)
+            {
+                cameraPosition = camera.GlobalPosition;
+                var planes = camera.GetFrustum();
+                for (var i = 0; i < _frustum.Length && i < planes.Count; i++)
+                    _frustum[i] = planes[i];
+                _frustumCount = Math.Min(_frustum.Length, planes.Count);
+            }
             _frameIndex++;
             _animated = 0;
             foreach (var npc in _npcs)
@@ -428,11 +447,10 @@ namespace GothicGodot.Spike
 
                 // Like the engine: NPCs beyond the object distance are hidden and not animated, NPCs outside the view
                 // keep their pose, far ones update less often.
-                var distance = npc.Position.DistanceTo(camera.GlobalPosition);
+                var distance = npc.Position.DistanceTo(cameraPosition);
                 var isVisible = distance < AnimationFar;
-                if (npc.Root.Visible != isVisible)
-                    npc.Root.Visible = isVisible;
-                if (!isVisible || !camera.IsPositionInFrustum(npc.Position + Vector3.Up))
+                npc.SetShown(isVisible);
+                if (!isVisible || !IsInFrustum(npc.Position + Vector3.Up))
                     continue;
                 var interval = distance < 25f ? 1 : distance < 50f ? 2 : 4;
                 if ((_frameIndex + npc.GetHashCode()) % interval != 0)
@@ -766,13 +784,13 @@ namespace GothicGodot.Spike
                         : npc.CurrentFreePoint?.Direction ?? Vector3.Zero;
                     facing.Y = 0;
                     if (facing.LengthSquared() > 0.0001f)
-                        npc.Root.Rotation = new Vector3(0, Mathf.Atan2(-facing.X, -facing.Z), 0);
+                        npc.FaceTowards(facing);
                     npc.Current = null;
                     break;
                 case GothicNpc.SpeakAction speak:
                     // Like Gothic-Unity's OutputSvm: SVM_<voice>_<key> names the WAV (and the OU.BIN subtitle). Only
                     // NPCs in hearing range load and play it; decoding runs off the main thread.
-                    if (npc.Root?.Visible != true || Sfx == null || npc.Position.DistanceTo(HeroPosition) > _hearingRange)
+                    if (npc.Root == null || !npc.IsShown || Sfx == null || npc.Position.DistanceTo(HeroPosition) > _hearingRange)
                     {
                         npc.Current = null;
                         break;
@@ -839,15 +857,15 @@ namespace GothicGodot.Spike
                         var distance = offset.Length();
                         if (distance <= step)
                         {
-                            npc.Root.GlobalPosition = target;
+                            npc.SetPosition(target);
                             npc.Path.RemoveAt(0);
                             step -= distance;
                             continue;
                         }
 
                         var direction = offset / distance;
-                        npc.Root.GlobalPosition += direction * step;
-                        npc.Root.Rotation = new Vector3(0, Mathf.Atan2(-direction.X, -direction.Z), 0);
+                        npc.SetPosition(npc.Position + direction * step);
+                        npc.FaceTowards(direction);
                         step = 0;
                     }
 
@@ -865,44 +883,88 @@ namespace GothicGodot.Spike
             return npc.Current == null;
         }
 
+        // The waynet as indices for the path search: names, positions, neighbours (built on first use).
+        private string[] _wpNames;
+        private Vector3[] _wpPositions;
+        private int[][] _wpNeighbours;
+        private Dictionary<string, int> _wpIndex;
+        private float[] _wpCost;
+        private int[] _wpFrom;
+        private int[] _wpStamp;
+        private int _wpGeneration;
+        private readonly PriorityQueue<int, float> _wpOpen = new();
+
+        private void BuildWaynetIndex()
+        {
+            _wpNames = _waypoints.Keys.ToArray();
+            _wpIndex = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            for (var i = 0; i < _wpNames.Length; i++)
+                _wpIndex[_wpNames[i]] = i;
+            _wpPositions = _wpNames.Select(n => _waypoints[n]).ToArray();
+            _wpNeighbours = _wpNames.Select(n => _waynet.TryGetValue(n, out var next)
+                ? next.Where(_wpIndex.ContainsKey).Select(x => _wpIndex[x]).Distinct().ToArray()
+                : Array.Empty<int>()).ToArray();
+            _wpCost = new float[_wpNames.Length];
+            _wpFrom = new int[_wpNames.Length];
+            _wpStamp = new int[_wpNames.Length];
+        }
+
+        /// <summary>
+        /// A* over the waynet from the waypoint nearest the start to the target waypoint (Gothic-Unity's NPCs take the
+        /// shortest way too); unreachable: straight to the target. Reuses its buffers - it runs whenever an NPC sets off.
+        /// </summary>
         private List<Vector3> FindPath(Vector3 from, string targetWaypoint)
         {
             var result = new List<Vector3>();
             if (!_waypoints.TryGetValue(targetWaypoint ?? "", out var targetPosition))
                 return result;
+            if (_wpNames == null)
+                BuildWaynetIndex();
 
-            var start = NearestWaypoint(from);
-            if (start == null)
-                return result;
-
-            // Breadth-first over the waynet, good enough for a camp.
-            var previous = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { [start] = null };
-            var queue = new Queue<string>();
-            queue.Enqueue(start);
-            while (queue.Count > 0)
-            {
-                var current = queue.Dequeue();
-                if (current.Equals(targetWaypoint, StringComparison.OrdinalIgnoreCase))
-                    break;
-                if (!_waynet.TryGetValue(current, out var next))
-                    continue;
-                foreach (var neighbour in next)
-                {
-                    if (previous.ContainsKey(neighbour))
-                        continue;
-                    previous[neighbour] = current;
-                    queue.Enqueue(neighbour);
-                }
-            }
-
-            if (!previous.ContainsKey(targetWaypoint))
+            var startName = NearestWaypoint(from);
+            if (startName == null || !_wpIndex.TryGetValue(startName, out var start) ||
+                !_wpIndex.TryGetValue(targetWaypoint, out var goal))
             {
                 result.Add(targetPosition);
                 return result;
             }
 
-            for (var node = targetWaypoint; node != null; node = previous[node])
-                result.Insert(0, _waypoints[node]);
+            _wpGeneration++;
+            _wpOpen.Clear();
+            _wpCost[start] = 0;
+            _wpFrom[start] = -1;
+            _wpStamp[start] = _wpGeneration;
+            _wpOpen.Enqueue(start, _wpPositions[start].DistanceTo(targetPosition));
+            var isFound = false;
+            while (_wpOpen.TryDequeue(out var current, out _))
+            {
+                if (current == goal)
+                {
+                    isFound = true;
+                    break;
+                }
+
+                foreach (var next in _wpNeighbours[current])
+                {
+                    var cost = _wpCost[current] + _wpPositions[current].DistanceTo(_wpPositions[next]);
+                    if (_wpStamp[next] == _wpGeneration && cost >= _wpCost[next])
+                        continue;
+                    _wpStamp[next] = _wpGeneration;
+                    _wpCost[next] = cost;
+                    _wpFrom[next] = current;
+                    _wpOpen.Enqueue(next, cost + _wpPositions[next].DistanceTo(targetPosition));
+                }
+            }
+
+            if (!isFound)
+            {
+                result.Add(targetPosition);
+                return result;
+            }
+
+            for (var node = goal; node >= 0; node = _wpFrom[node])
+                result.Add(_wpPositions[node]);
+            result.Reverse();
             return result;
         }
 
@@ -917,18 +979,43 @@ namespace GothicGodot.Spike
             return path;
         }
 
+        private const float _waypointCell = 16f;
+        private readonly Dictionary<(int, int), List<(string Name, Vector3 Position)>> _waypointCells = new();
+
+        private static (int, int) WaypointCell(Vector3 position) =>
+            ((int)Mathf.Floor(position.X / _waypointCell), (int)Mathf.Floor(position.Z / _waypointCell));
+
+        /// <summary>
+        /// Ring by ring over a 16 m grid until no closer waypoint can come (G2 has thousands; scanning all of them
+        /// for every walk was a long frame each time an NPC set off).
+        /// </summary>
         private string NearestWaypoint(Vector3 position)
         {
             string best = null;
             var bestDistance = float.MaxValue;
-            foreach (var (name, point) in _waypoints)
+            var (cx, cz) = WaypointCell(position);
+            for (var ring = 0; ring < 64; ring++)
             {
-                var distance = point.DistanceSquaredTo(position);
-                if (distance < bestDistance)
+                for (var x = cx - ring; x <= cx + ring; x++)
+                for (var z = cz - ring; z <= cz + ring; z++)
                 {
-                    bestDistance = distance;
-                    best = name;
+                    if (Math.Abs(x - cx) != ring && Math.Abs(z - cz) != ring)
+                        continue;
+                    if (!_waypointCells.TryGetValue((x, z), out var cell))
+                        continue;
+                    foreach (var (name, point) in cell)
+                    {
+                        var distance = point.DistanceSquaredTo(position);
+                        if (distance >= bestDistance)
+                            continue;
+                        bestDistance = distance;
+                        best = name;
+                    }
                 }
+
+                // Anything in the next ring is at least ring * cell size away.
+                if (best != null && bestDistance <= ring * _waypointCell * (ring * _waypointCell))
+                    break;
             }
 
             return best;
@@ -1077,12 +1164,25 @@ namespace GothicGodot.Spike
         public float AnimationFar { get; set; }
 
         private long _frameIndex;
+        private readonly Plane[] _frustum = new Plane[6];
+        private int _frustumCount;
+
+        private bool IsInFrustum(Vector3 point)
+        {
+            for (var i = 0; i < _frustumCount; i++)
+                if (_frustum[i].IsPointOver(point))
+                    return false;
+            return true;
+        }
         private int _animated;
         private long _animatedSum;
 
         private void Animate(GothicNpc npc)
         {
-            npc.Clip?.Apply(npc.Skeleton, npc.ClipTime, npc.IsClipLooping, BoneMode == "pose");
+            if (npc.Clip == null)
+                return;
+            npc.Clip.Apply(npc.Skeleton, npc.ClipTime, npc.IsClipLooping, BoneMode == "pose", npc.AppliedClip != npc.Clip);
+            npc.AppliedClip = npc.Clip;
         }
 
         // ---- Externals ----

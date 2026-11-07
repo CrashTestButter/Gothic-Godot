@@ -186,6 +186,7 @@ namespace GothicGodot.Spike
                     hero?.BodyTexture ?? 0, hero?.SkinColor ?? 0) ?? _humans.GetSkinnedMesh("HUM_BODY_NAKED0.MDM");
             }
 
+            textures.Compression = _args.Get("texture-compression", "none");
             var array = textures.Build();
             foreach (var material in materials)
             {

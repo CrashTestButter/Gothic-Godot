@@ -263,7 +263,7 @@ namespace GothicGodot.Dialog
             var bestDistance = _talkDistance;
             foreach (var npc in _ai.Npcs)
             {
-                if (npc.Root == null || !npc.Root.Visible || npc.IsDown || !_dialog.HasInfos(npc))
+                if (npc.Root == null || !npc.IsShown || npc.IsDown || !_dialog.HasInfos(npc))
                     continue;
                 var toNpc = npc.Position + Vector3.Up * 1.5f - head;
                 toNpc.Y = 0;
@@ -440,7 +440,7 @@ namespace GothicGodot.Dialog
             }
 
             // The hero 1.2 m in front of the NPC, facing it.
-            var forward = -npc.Root.GlobalBasis.Z;
+            var forward = npc.Forward;
             forward.Y = 0;
             forward = forward.Normalized();
             var position = npc.Position + forward * 1.2f;

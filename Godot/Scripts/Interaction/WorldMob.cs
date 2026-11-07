@@ -80,7 +80,8 @@ namespace GothicGodot.Interaction
                 return false;
             _skeleton = factory.CreateSkeleton();
             AddChild(_skeleton);
-            var instance = new MeshInstance3D { Mesh = mesh, Skin = factory.Skin };
+            // Hidden beyond 50 m like Gothic's object fade (each mob is a draw call and a skeleton).
+            var instance = new MeshInstance3D { Mesh = mesh, Skin = factory.Skin, VisibilityRangeEnd = 50f };
             _skeleton.AddChild(instance);
             instance.Skeleton = instance.GetPathTo(_skeleton);
             instance.SetInstanceShaderParameter("tint", tint);

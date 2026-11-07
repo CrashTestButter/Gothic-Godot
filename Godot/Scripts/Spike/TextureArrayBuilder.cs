@@ -36,7 +36,9 @@ namespace GothicGodot.Spike
             if (_singles.TryGetValue(textureName, out var cached))
                 return cached;
             var layer = GetLayer(textureName, out _);
-            var texture = layer > 0 && layer < _images.Count ? ImageTexture.CreateFromImage(_images[layer]) : null;
+            var image = layer > 0 && layer < _images.Count ? _images[layer] : null;
+            image ??= layer > 0 ? LoadImage(textureName, out _) : null;
+            var texture = image != null ? ImageTexture.CreateFromImage(image) : null;
             _singles[textureName] = texture;
             return texture;
         }
@@ -72,6 +74,33 @@ namespace GothicGodot.Spike
             }
 
             layer = 0;
+            var image = LoadImage(textureName, out hasAlpha);
+            if (image != null)
+            {
+                layer = _images.Count;
+                _images.Add(image);
+            }
+            else
+            {
+                MissingCount++;
+                MissingNames.Add(textureName);
+            }
+
+            _layers[textureName] = layer;
+            _hasAlpha[textureName] = hasAlpha;
+            return layer;
+        }
+
+        /// <summary>
+        /// Compression of the array's layers: none (RGBA8, 4 bytes a texel), etc2 or astc (Quest GPUs, 0.5 / 1 byte),
+        /// s3tc (desktop GPUs). Compressed on the CPU at load time, all layers in one format.
+        /// </summary>
+        public string Compression { get; set; } = "none";
+
+        /// <summary>A texture decoded and scaled to the layer size with mipmaps; null if it can't be read.</summary>
+        private Image LoadImage(string textureName, out bool hasAlpha)
+        {
+            hasAlpha = false;
             try
             {
                 var key = $"{System.IO.Path.GetFileNameWithoutExtension(textureName).ToLowerInvariant()}-c.tex";
@@ -91,26 +120,36 @@ namespace GothicGodot.Spike
                 if (width != _sliceSize || height != _sliceSize)
                     image.Resize(_sliceSize, _sliceSize, Image.Interpolation.Bilinear);
                 image.GenerateMipmaps();
-
-                layer = _images.Count;
-                _images.Add(image);
+                return image;
             }
             catch (Exception)
             {
-                MissingCount++;
-                MissingNames.Add(textureName);
+                return null;
             }
-
-            _layers[textureName] = layer;
-            _hasAlpha[textureName] = hasAlpha;
-            return layer;
         }
 
         public Texture2DArray Build()
         {
             BuiltLayerCount = _images.Count;
+            var mode = Compression switch
+            {
+                "etc2" => Image.CompressMode.Etc2,
+                "astc" => Image.CompressMode.Astc,
+                "s3tc" => Image.CompressMode.S3Tc,
+                _ => (Image.CompressMode?)null
+            };
+            if (mode != null)
+            {
+                foreach (var image in _images)
+                    if (!image.IsCompressed())
+                        image.Compress(mode.Value);
+            }
+
             var array = new Texture2DArray();
             array.CreateFromImages(_images);
+            // The GPU has them now: the decoded images (G2: ~180 MB) are let go; late textures decode again.
+            for (var i = 0; i < _images.Count; i++)
+                _images[i] = null;
             return array;
         }
     }
