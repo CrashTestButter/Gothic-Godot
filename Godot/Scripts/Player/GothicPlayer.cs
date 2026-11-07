@@ -43,6 +43,20 @@ namespace GothicGodot.Player
         private bool _isTeleportTestDone;
 
         public Camera3D Camera => _isXr ? _xrCamera : _desktopCamera;
+        public bool IsXr => _isXr;
+        public XRController3D RightHand => _right;
+        public bool IsPlaced => _isPlaced;
+
+        /// <summary>Gothic pins the hero in a dialog: no walking, turning or teleporting (the head still looks).</summary>
+        public bool IsInputLocked { get; set; }
+
+        /// <summary>Puts the player's feet at the position, facing along the yaw (radians).</summary>
+        public void PlaceAt(Vector3 position, float yaw)
+        {
+            GlobalPosition = position;
+            Rotation = new Vector3(0, yaw, 0);
+            Velocity = Vector3.Zero;
+        }
 
         public void Setup(bool isXr, float slopeDegrees, float far, float walkTestSeconds, float teleportTestDelay = 0f)
         {
@@ -118,7 +132,8 @@ namespace GothicGodot.Player
             if (_isXr)
                 FollowHead();
 
-            var input = GetMoveInput(dt, out var isRunning);
+            var isRunning = false;
+            var input = IsInputLocked ? Vector2.Zero : GetMoveInput(dt, out isRunning);
             var forward = GetViewYaw();
             var direction = (forward * -input.Y + forward.Cross(Vector3.Up) * input.X).Normalized() *
                             Mathf.Min(1f, input.Length());
@@ -134,8 +149,12 @@ namespace GothicGodot.Player
             if (IsOnWall() && direction.LengthSquared() > 0.01f)
                 TryStepUp(before, direction * speed * dt);
 
-            HandleSnapTurn();
-            HandleTeleport(delta);
+            if (!IsInputLocked)
+            {
+                HandleSnapTurn();
+                HandleTeleport(delta);
+            }
+
             LogWalkTest(delta);
         }
 

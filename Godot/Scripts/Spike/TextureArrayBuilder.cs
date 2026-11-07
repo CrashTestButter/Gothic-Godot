@@ -20,6 +20,7 @@ namespace GothicGodot.Spike
 
         public int LayerCount => _images.Count;
         public int MissingCount { get; private set; }
+        public List<string> MissingNames { get; } = new();
 
         public TextureArrayBuilder(Vfs vfs, int sliceSize)
         {
@@ -31,6 +32,11 @@ namespace GothicGodot.Spike
             white.GenerateMipmaps();
             _images.Add(white);
         }
+
+        /// <summary>Whether the texture exists (compiled), e.g. a body texture variant.</summary>
+        public bool Exists(string textureName) =>
+            _layers.ContainsKey(textureName) ||
+            _vfs.Find($"{System.IO.Path.GetFileNameWithoutExtension(textureName).ToLowerInvariant()}-c.tex") != null;
 
         public int GetLayer(string textureName, out bool hasAlpha)
         {
@@ -71,6 +77,7 @@ namespace GothicGodot.Spike
             catch (Exception)
             {
                 MissingCount++;
+                MissingNames.Add(textureName);
             }
 
             _layers[textureName] = layer;

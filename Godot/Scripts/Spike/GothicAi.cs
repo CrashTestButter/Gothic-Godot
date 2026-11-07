@@ -56,6 +56,10 @@ namespace GothicGodot.Spike
         private long _allocatedAtLastLog;
 
         public int Count => _npcs.Count;
+        public IReadOnlyList<GothicNpc> Npcs => _npcs;
+        public GothicDialog Dialog { get; private set; }
+        public NpcInstance HeroInstance => _hero?.Instance;
+        public Vector3 HeroPosition => _hero?.Root != null ? _hero.Root.GlobalPosition : Vector3.Zero;
 
         /// <summary>The player becomes the hero the NPCs perceive (instead of the fixed hero position).</summary>
         public void SetHero(Node3D player)
@@ -67,7 +71,7 @@ namespace GothicGodot.Spike
         }
 
         public void Init(Vfs vfs, HumanFactory factory, ZenKit.World world, GroundLightSampler light, int hour,
-            Vector3 heroPosition, float radius, string startupFunction)
+            Vector3 heroPosition, float radius, string startupFunction, string dataPath)
         {
             _factory = factory;
             _world = world;
@@ -111,6 +115,9 @@ namespace GothicGodot.Spike
                 Spawn(instance, waypoint);
             }
 
+            Dialog = new GothicDialog(_vm, vfs, this, dataPath);
+            GD.Print($"[Dialog] {Dialog.InfoCount} infos, subtitles {(Dialog.HasSubtitles ? "OU.BIN" : "missing")}");
+
             _world = null;
             GD.Print($"[Ai] {startupFunction} inserted {_spawns.Count} NPCs, {_npcs.Count} within {radius} m spawned at " +
                      $"{hour:00}:00 ({_skippedMonsters} monsters left out), routines {_npcs.Sum(n => n.Routine.Count)} entries");
@@ -151,8 +158,9 @@ namespace GothicGodot.Spike
             }
 
             var armorMdm = GetArmorMdm(npc.ArmorInstance);
-            var body = _factory.GetSkinnedMesh(armorMdm ?? $"{npc.Body.ToUpperInvariant()}.MDM") ??
-                       _factory.GetSkinnedMesh("HUM_BODY_NAKED0.MDM");
+            var bodyMdm = armorMdm ?? $"{npc.Body.ToUpperInvariant()}.MDM";
+            var body = _factory.GetSkinnedMesh(bodyMdm, npc.BodyTexture, npc.SkinColor) ??
+                       _factory.GetSkinnedMesh("HUM_BODY_NAKED0.MDM", npc.BodyTexture, npc.SkinColor);
             if (body == null)
                 return;
 
@@ -171,7 +179,9 @@ namespace GothicGodot.Spike
             bodyInstance.Skeleton = bodyInstance.GetPathTo(npc.Skeleton);
             bodyInstance.SetInstanceShaderParameter("tint", tint);
 
-            var head = string.IsNullOrEmpty(npc.Head) ? null : _factory.GetHeadMesh($"{npc.Head.ToUpperInvariant()}.MMB");
+            var head = string.IsNullOrEmpty(npc.Head)
+                ? null
+                : _factory.GetHeadMesh($"{npc.Head.ToUpperInvariant()}.MMB", npc.HeadTexture, npc.SkinColor);
             if (head != null)
             {
                 var attachment = new BoneAttachment3D { BoneName = "BIP01 HEAD" };
@@ -210,7 +220,9 @@ namespace GothicGodot.Spike
             var vmBefore = _vmWatch.Elapsed.TotalMilliseconds;
 
             foreach (var npc in _npcs)
-                Tick(npc, delta);
+                if (!npc.IsInDialog)
+                    Tick(npc, delta);
+            Dialog?.Update(delta);
 
             var aiMs = _frameWatch.Elapsed.TotalMilliseconds;
             _frameWatch.Restart();
@@ -588,7 +600,14 @@ namespace GothicGodot.Spike
 
         // ---- Animation ----
 
-        private bool PlayClip(GothicNpc npc, string name, bool isLooping)
+        /// <summary>Body, armour and its mesh, for test logs.</summary>
+        public string DescribeLook(GothicNpc npc) =>
+            $"body {npc.Body}, head {npc.Head}, armour {(npc.ArmorInstance > 0 ? _vm.GetSymbolByIndex(npc.ArmorInstance)?.Name : "none")} " +
+            $"({GetArmorMdm(npc.ArmorInstance) ?? "naked"})";
+
+        public bool HasClip(string name) => _factory.GetClip(name.ToUpperInvariant()) != null;
+
+        public bool PlayClip(GothicNpc npc, string name, bool isLooping)
         {
             var clip = _factory.GetClip(name.ToUpperInvariant());
             if (clip == null)
@@ -676,7 +695,10 @@ namespace GothicGodot.Spike
                         if (Npc(npc) is not { } target)
                             return;
                         target.Body = body;
+                        target.BodyTexture = bodyTex;
+                        target.SkinColor = skin;
                         target.Head = head;
+                        target.HeadTexture = headTex;
                         target.ArmorInstance = armor;
                     }));
             _vm.RegisterExternal("TA_MIN",

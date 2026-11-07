@@ -51,6 +51,9 @@ namespace GothicGodot.Spike
         public string Visual;
         public string Body = "HUM_BODY_NAKED0";
         public string Head;
+        public int BodyTexture;
+        public int SkinColor;
+        public int HeadTexture;
         public int ArmorInstance = -1;
         public string SpawnWaypoint;
         public readonly List<RoutineEntry> Routine = new();
@@ -78,6 +81,9 @@ namespace GothicGodot.Spike
         public Action Current;
         public double ActionTime;
         public readonly List<Vector3> Path = new();
+
+        /// <summary>In a dialog with the hero: AI and routine wait, the dialog plays the animations.</summary>
+        public bool IsInDialog;
 
         public Vector3 Position => Root.GlobalPosition;
     }

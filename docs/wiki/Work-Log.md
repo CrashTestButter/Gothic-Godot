@@ -2,6 +2,24 @@
 
 Newest first.
 
+## 2026-11-07 - Dialogs: choices, voices, subtitles
+
+![Stone's dialog options (G1)](images/dialog-stone-options.png)
+![Subtitle of the hero's line](images/dialog-stone-subtitle.png)
+![Pablo's sub choices (G2)](images/dialog-pablo-choices.png)
+
+- Gothic's dialogs on the same Daedalus VM as the AI, following Gothic-Unity's dialog flow: the NPC's infos (C_INFO, sorted by number), important ones start by themselves, the others are offered while their condition is true and they weren't told (or are permanent). Info functions run with self = the NPC, other = the hero.
+- Externals: AI_Output (line with voice and subtitle), Info_AddChoice / Info_ClearChoices (sub choices, newest first like the engine), AI_StopProcessInfos, AI_ProcessInfos (an NPC with an important info talks to a hero within 5 m), Npc_KnowsInfo, Npc_CheckInfo, InfoManager_HasFinished, plus Hlp_GetInstanceID, Npc_IsPlayer, Hlp_StrCmp, Npc_GetTrueGuild that conditions need.
+- Voices: Gothic's speech WAVs as Godot streams; IMA ADPCM decoded by Gothic-Unity's own decoder from the shared core. NPC lines play at the NPC, the hero's in the head. Subtitles from OU.BIN.
+- The NPC stops its routine, turns to the hero and gestures (T_DIALOGGESTURE_xx) while it speaks; the hero is pinned (no walking, turning or teleporting), the head can look around.
+- In VR: the NPC in front within 3 m gets a name tag, the trigger talks; subtitles and choices on a panel below the eyes; choose by pointing, right stick or trigger; the trigger skips a line. Desktop: F, arrow keys / W / S / 1-9, Enter / Space / click.
+- Tested without a headset (`--dialog-test=nearest`, talks to the nearest NPC with three infos, chooses, screenshots, quits): G1 Old Camp Stone, 2 choices, 6 lines, all with voice; G2 Khorinis Pablo, his important "wanted" info starts by itself, sub choices, 11 lines, all with voice.
+- Found on the way:
+  - Other NPCs' lines leaked into the dialog (Vatras preaching in the market place calls AI_Output from his own state): only the dialog's two speakers count now.
+  - The native ZenKit library from binary-dependencies has no VFS loader for cutscene libraries (`ZkCutsceneLibrary_loadVfs` missing); OU.BIN comes from the disk like in Gothic-Unity.
+  - NPCs wore placeholder textures (Stone's apron flat red): the engine swaps `_V0_C0` in body and head textures for the script's body texture and skin colour numbers (Mdl_SetVisualBody); the spike ignored them. Done now, 71 more texture layers in G1.
+- Not in it yet: trade, items given in dialogs, the hero's own animations, NPCs' ambient talk, lip sync, choice text from the info manager's fonts.
+
 ## 2026-11-07 - Playable: the player walks and teleports
 
 Decided with the owner: playable VR first, built on Gothic-Unity's shared core (see [[Porting-Strategy]], 77 core files compile unchanged into the Godot project).

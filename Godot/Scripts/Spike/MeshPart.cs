@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using Godot;
 using ZenKit;
@@ -32,7 +33,7 @@ namespace GothicGodot.Spike
             new Vector3(m.M14 / 100f, m.M24 / 100f, -m.M34 / 100f));
 
         public static void AddFromMrm(IMultiResolutionMesh mrm, TextureArrayBuilder textures, Transform3D transform,
-            List<MeshPart> parts)
+            List<MeshPart> parts, Func<string, string> textureName = null)
         {
             var positions = mrm.Positions;
             foreach (var subMesh in mrm.SubMeshes)
@@ -41,7 +42,8 @@ namespace GothicGodot.Spike
                 if (triangles.Count == 0)
                     continue;
 
-                var layer = textures.GetLayer(subMesh.Material.Texture, out var hasAlpha);
+                var texture = subMesh.Material.Texture;
+                var layer = textures.GetLayer(textureName != null ? textureName(texture) : texture, out var hasAlpha);
                 if (layer == 0)
                     continue;
 

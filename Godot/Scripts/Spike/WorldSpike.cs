@@ -117,7 +117,7 @@ namespace GothicGodot.Spike
                 _ai = ai;
                 ai.Init(vfs, humans, world, groundLight, _args.GetInt("hour", 12), GetCameraStart(world),
                     _args.GetFloat("ai-radius", 150f),
-                    _args.Get("startup", _args.IsGothic2 ? "STARTUP_NEWWORLD" : "STARTUP_OLDCAMP"));
+                    _args.Get("startup", _args.IsGothic2 ? "STARTUP_NEWWORLD" : "STARTUP_OLDCAMP"), _args.DataPath);
                 Log($"AI NPCs spawned in {watch.ElapsedMilliseconds} ms: {ai.Count}");
             }
             else if (npcCount > 0)
@@ -143,6 +143,8 @@ namespace GothicGodot.Spike
             Log($"world nodes created in {watch.ElapsedMilliseconds} ms: {builder.ChunkCount} chunks, " +
                 $"{builder.TriangleCount} triangles, {textures.LayerCount} texture layers, {textures.MissingCount} missing");
 
+            if (textures.MissingCount > 0)
+                Log("textures missing: " + string.Join(", ", textures.MissingNames.Take(40)));
             var array = textures.Build();
             foreach (var material in materials)
             {
@@ -478,6 +480,12 @@ namespace GothicGodot.Spike
             player.Rotation = new Vector3(0, Mathf.DegToRad(_args.GetFloat("yaw", 0f)), 0);
             _ai?.SetHero(player);
             _camera = player.Camera;
+            if (_ai?.Dialog != null)
+            {
+                var dialog = new GothicGodot.Dialog.DialogPanel { Name = "Dialog" };
+                AddChild(dialog);
+                dialog.Init(_ai, player, _args.Get("dialog-test", ""), _args.Screenshot);
+            }
         }
 
         private void CreateRig(bool isXr, Vector3 position)

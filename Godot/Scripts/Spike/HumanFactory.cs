@@ -95,9 +95,29 @@ namespace GothicGodot.Spike
             return skeleton;
         }
 
-        public ArrayMesh GetSkinnedMesh(string mdmName)
+        /// <summary>
+        /// The engine's texture variants: "_V0_C0" in a body or head texture becomes "_V{variant}_C{skin}" from
+        /// Mdl_SetVisualBody (body: body texture and skin colour, head: head texture and skin colour). Missing
+        /// variants keep the original texture.
+        /// </summary>
+        private Func<string, string> GetVariantNames(int variant, int skin)
         {
-            if (_meshes.TryGetValue(mdmName, out var cached))
+            if (variant == 0 && skin == 0)
+                return null;
+            return name =>
+            {
+                var index = name.IndexOf("_V0_C0", StringComparison.OrdinalIgnoreCase);
+                if (index < 0)
+                    return name;
+                var changed = $"{name[..index]}_V{variant}_C{skin}{name[(index + 6)..]}";
+                return _textures.Exists(changed) ? changed : name;
+            };
+        }
+
+        public ArrayMesh GetSkinnedMesh(string mdmName, int variant = 0, int skin = 0)
+        {
+            var key = $"{mdmName}|{variant}|{skin}";
+            if (_meshes.TryGetValue(key, out var cached))
                 return cached;
 
             ArrayMesh result = null;
@@ -105,19 +125,21 @@ namespace GothicGodot.Spike
             {
                 var model = new ModelMesh(_vfs, mdmName).Cache();
                 result = new ArrayMesh();
+                var names = GetVariantNames(variant, skin);
                 foreach (var soft in model.Meshes)
-                    AddSoftSkin(soft, result);
+                    AddSoftSkin(soft, result, names);
                 if (result.GetSurfaceCount() == 0)
                     result = null;
             }
 
-            _meshes[mdmName] = result;
+            _meshes[key] = result;
             return result;
         }
 
-        public ArrayMesh GetHeadMesh(string mmbName)
+        public ArrayMesh GetHeadMesh(string mmbName, int variant = 0, int skin = 0)
         {
-            if (_meshes.TryGetValue(mmbName, out var cached))
+            var key = $"{mmbName}|{variant}|{skin}";
+            if (_meshes.TryGetValue(key, out var cached))
                 return cached;
 
             ArrayMesh result = null;
@@ -125,7 +147,7 @@ namespace GothicGodot.Spike
             {
                 var morph = new MorphMesh(_vfs, mmbName).Cache();
                 var parts = new List<MeshPart>();
-                MeshPart.AddFromMrm(morph.Mesh, _textures, Transform3D.Identity, parts);
+                MeshPart.AddFromMrm(morph.Mesh, _textures, Transform3D.Identity, parts, GetVariantNames(variant, skin));
                 result = new ArrayMesh();
                 foreach (var part in parts)
                 {
@@ -138,7 +160,7 @@ namespace GothicGodot.Spike
                 }
             }
 
-            _meshes[mmbName] = result;
+            _meshes[key] = result;
             return result;
         }
 
@@ -186,7 +208,7 @@ namespace GothicGodot.Spike
             return clip;
         }
 
-        private void AddSoftSkin(ISoftSkinMesh soft, ArrayMesh mesh)
+        private void AddSoftSkin(ISoftSkinMesh soft, ArrayMesh mesh, Func<string, string> textureName)
         {
             var mrm = soft.Mesh;
             var weights = soft.Weights;
@@ -211,7 +233,8 @@ namespace GothicGodot.Spike
                 if (triangles.Count == 0)
                     continue;
 
-                var layer = _textures.GetLayer(subMesh.Material.Texture, out var hasAlpha);
+                var texture = subMesh.Material.Texture;
+                var layer = _textures.GetLayer(textureName != null ? textureName(texture) : texture, out var hasAlpha);
                 var wedges = subMesh.Wedges;
                 var count = wedges.Count;
                 var vertices = new Vector3[count];
