@@ -55,7 +55,7 @@ namespace GothicGodot.Spike
             AddChild(worldRoot);
 
             var groundLight = new GroundLightSampler();
-            var builder = new WorldChunkBuilder(_args.CellSize);
+            var builder = new WorldChunkBuilder(_args.CellSize) { ObjectFarDistance = _args.GetFloat("object-far", 0f) };
             builder.AddWorld(mesh, WorldChunkBuilder.GetLeafPolygons(world.BspTree.Cache()), textures, groundLight);
             Log($"world polygons collected in {watch.ElapsedMilliseconds} ms");
 
@@ -92,6 +92,10 @@ namespace GothicGodot.Spike
                 crowd.Spawn(humans, world, npcCount, groundLight, _args.Get("bone-mode", "split"));
                 Log($"humans spawned in {watch.ElapsedMilliseconds} ms: {crowd.Count}");
             }
+
+            foreach (var skipped in _args.Get("skip", "").Split(',', StringSplitOptions.RemoveEmptyEntries))
+                if (Enum.TryParse<WorldChunkBuilder.Kind>(skipped, true, out var kind))
+                    builder.SkippedKinds.Add(kind);
 
             var isCollisionEnabled = _args.Get("collision", "true") == "true";
             builder.CreateNodes(worldRoot, kind => materials[(int)kind], isCollisionEnabled);
@@ -157,6 +161,10 @@ namespace GothicGodot.Spike
 
             foreach (var vob in world.RootObjects)
                 Walk(vob);
+
+            var far = _args.GetFloat("pfx-far", 0f);
+            if (far > 0)
+                AddChild(new PfxCuller(pfx.Emitters, far));
             Log($"particles built in {watch.ElapsedMilliseconds} ms: {pfx.EmitterCount} emitters, {pfx.MissingCount} missing");
         }
 
@@ -325,7 +333,29 @@ namespace GothicGodot.Spike
 
             DisplayServer.WindowSetVsyncMode(DisplayServer.VSyncMode.Disabled);
             GetViewport().UseXR = true;
-            Log("OpenXR started");
+
+            // Benchmark knobs: --msaa=0|2|4|8, --foveation=0..3. The refresh rate comes from the runtime
+            // (tools/quest-bench.sh sets debug.oculus.refreshRate; requesting it here before the session runs made
+            // the Quest fall back to 120 Hz).
+            if (xr is OpenXRInterface openXr)
+            {
+                var foveation = _args.GetInt("foveation", -1);
+                if (foveation >= 0)
+                    openXr.FoveationLevel = foveation;
+                Log($"OpenXR started: foveation {openXr.FoveationLevel}, " +
+                    $"rates {string.Join("/", openXr.GetAvailableDisplayRefreshRates())}");
+            }
+
+            var msaa = _args.GetInt("msaa", -1);
+            if (msaa >= 0)
+                GetViewport().Msaa3D = msaa switch
+                {
+                    0 => Viewport.Msaa.Disabled,
+                    2 => Viewport.Msaa.Msaa2X,
+                    8 => Viewport.Msaa.Msaa8X,
+                    _ => Viewport.Msaa.Msaa4X
+                };
+            Log($"MSAA {GetViewport().Msaa3D}");
             return true;
         }
 
@@ -367,7 +397,7 @@ namespace GothicGodot.Spike
             if (isXr)
             {
                 var origin = new XROrigin3D();
-                origin.AddChild(new XRCamera3D { Far = 300 });
+                origin.AddChild(new XRCamera3D { Far = _args.GetFloat("far", 600f) });
                 _rig = origin;
             }
             else

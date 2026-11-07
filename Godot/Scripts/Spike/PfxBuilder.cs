@@ -23,7 +23,8 @@ namespace GothicGodot.Spike
         private readonly DaedalusVm _vm;
         private readonly Dictionary<string, GpuTemplate> _templates = new(StringComparer.OrdinalIgnoreCase);
 
-        public int EmitterCount { get; private set; }
+        public List<GpuParticles3D> Emitters { get; } = new();
+        public int EmitterCount => Emitters.Count;
         public int MissingCount { get; private set; }
 
         private class GpuTemplate
@@ -59,7 +60,7 @@ namespace GothicGodot.Spike
             };
             parent.AddChild(particles);
             particles.GlobalTransform = transform;
-            EmitterCount++;
+            Emitters.Add(particles);
         }
 
         private GpuTemplate GetTemplate(string visual)

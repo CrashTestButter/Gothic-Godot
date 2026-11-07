@@ -25,6 +25,7 @@ openxr/enabled=false
 openxr/enabled.android=true
 openxr/foveation_level=3
 openxr/foveation_dynamic=true
+openxr/extensions/hand_tracking=true
 shaders/enabled=true
 
 [physics]

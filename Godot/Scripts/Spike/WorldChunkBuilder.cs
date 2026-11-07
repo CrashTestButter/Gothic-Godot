@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Godot;
 using ZenKit;
 using Material = Godot.Material;
@@ -43,6 +44,7 @@ namespace GothicGodot.Spike
 
         private readonly float _cellSize;
         private readonly Dictionary<(int X, int Z, Kind Kind), Chunk> _chunks = new();
+        private readonly Dictionary<(int X, int Z, Kind Kind), Chunk> _objectChunks = new();
 
         public int ChunkCount { get; private set; }
         public int TriangleCount { get; private set; }
@@ -144,7 +146,7 @@ namespace GothicGodot.Spike
         public void AddObject(Vector3 origin, Kind kind, Vector3[] positions, Vector3[] normals, Vector2[] uvs,
             int layer, Color[] colors, int[] indices)
         {
-            var chunk = GetChunk(origin, kind);
+            var chunk = GetChunk(origin, kind, ObjectFarDistance > 0 ? _objectChunks : _chunks);
             var start = chunk.Positions.Count;
             chunk.Positions.AddRange(positions);
             chunk.Normals.AddRange(normals);
@@ -158,6 +160,15 @@ namespace GothicGodot.Spike
 
         public int CollisionTriangleCount { get; private set; }
 
+        /// <summary>
+        /// Objects further than this (metres) are not drawn, like Gothic's object far clip; 0 = merged into the
+        /// world cells and drawn as far as the world. Objects then get their own cell meshes.
+        /// </summary>
+        public float ObjectFarDistance { get; set; }
+
+        /// <summary>Kinds left out (benchmark: their share of the GPU time).</summary>
+        public HashSet<Kind> SkippedKinds { get; } = new();
+
         public void CreateNodes(Node3D parent, Func<Kind, Material> getMaterial, bool isCollisionEnabled = false)
         {
             StaticBody3D body = null;
@@ -167,8 +178,24 @@ namespace GothicGodot.Spike
                 parent.AddChild(body);
             }
 
-            foreach (var ((x, z, kind), chunk) in _chunks)
+            foreach (var ((x, z, kind), chunk, isObject) in _chunks.Select(c => (c.Key, c.Value, false))
+                         .Concat(_objectChunks.Select(c => (c.Key, c.Value, true))))
             {
+                if (SkippedKinds.Contains(kind))
+                    continue;
+
+                // Object cells are drawn up to the object far distance, measured from the cell's centre.
+                var center = Vector3.Zero;
+                if (isObject)
+                {
+                    var bounds = new Aabb(chunk.Positions[0], Vector3.Zero);
+                    foreach (var position in chunk.Positions)
+                        bounds = bounds.Expand(position);
+                    center = bounds.GetCenter();
+                    for (var i = 0; i < chunk.Positions.Count; i++)
+                        chunk.Positions[i] -= center;
+                }
+
                 var arrays = new Godot.Collections.Array();
                 arrays.Resize((int)Mesh.ArrayType.Max);
                 arrays[(int)Mesh.ArrayType.Vertex] = chunk.Positions.ToArray();
@@ -182,18 +209,25 @@ namespace GothicGodot.Spike
                 arrayMesh.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, arrays);
                 arrayMesh.SurfaceSetMaterial(0, getMaterial(kind));
 
-                parent.AddChild(new MeshInstance3D
+                var instance = new MeshInstance3D
                 {
-                    Name = $"{kind}_{x}_{z}",
+                    Name = $"{(isObject ? "Objects" : kind)}_{x}_{z}",
                     Mesh = arrayMesh,
+                    Position = center,
                     CastShadow = GeometryInstance3D.ShadowCastingSetting.Off
-                });
+                };
+                if (isObject)
+                {
+                    instance.VisibilityRangeEnd = ObjectFarDistance + _cellSize * 0.5f;
+                    instance.VisibilityRangeEndMargin = 2f;
+                }
+                parent.AddChild(instance);
 
                 if (body != null && kind != Kind.Water)
                 {
                     var faces = new Vector3[chunk.Indices.Count];
                     for (var i = 0; i < faces.Length; i++)
-                        faces[i] = chunk.Positions[chunk.Indices[i]];
+                        faces[i] = chunk.Positions[chunk.Indices[i]] + center;
                     var shape = new ConcavePolygonShape3D { BackfaceCollision = true };
                     shape.SetFaces(faces);
                     body.AddChild(new CollisionShape3D { Shape = shape });
@@ -205,15 +239,18 @@ namespace GothicGodot.Spike
             }
 
             _chunks.Clear();
+            _objectChunks.Clear();
         }
 
-        private Chunk GetChunk(Vector3 position, Kind kind)
+        private Chunk GetChunk(Vector3 position, Kind kind) => GetChunk(position, kind, _chunks);
+
+        private Chunk GetChunk(Vector3 position, Kind kind, Dictionary<(int X, int Z, Kind Kind), Chunk> chunks)
         {
             var key = ((int)Math.Floor(position.X / _cellSize), (int)Math.Floor(position.Z / _cellSize), kind);
-            if (!_chunks.TryGetValue(key, out var chunk))
+            if (!chunks.TryGetValue(key, out var chunk))
             {
                 chunk = new Chunk();
-                _chunks[key] = chunk;
+                chunks[key] = chunk;
             }
 
             return chunk;

@@ -14,14 +14,16 @@ How tied Gothic-Unity is to Unity today (split/14, 2026-11-06): 573 C# files (~8
 - An unconfirmed forum report shows 7 ms spikes in an empty 4.7.1 C# project on Android phones ([forum](https://forum.godotengine.org/t/godot-4-mobile-performance/142637)).
 - No Quest store game written in Godot C# found.
 - Fixed: the C# startup crash on Quest (DLL extraction) in 4.5 ([godot#103915](https://github.com/godotengine/godot/issues/103915)).
-- Status: **open**. Fix paths to test: Mono AOT, NativeAOT via linux-bionic, CoreCLR on Android from .NET 11 in a Godot fork, zero allocations per frame.
+- Measured on the Quest 3 (2026-11-07): the spike runs on MonoVM without a single garbage collection while running, engine calls cost 0.27-0.3 µs each (desktop 0.14-0.23 µs), CPU 19-30%. See [[Work-Log]].
+- Status: **measured** for rendering and animation; game logic (Daedalus VM, AI) still to measure. Fix paths if needed later: Mono AOT, NativeAOT via linux-bionic, CoreCLR on Android from .NET 11 in a Godot fork.
 
 ### R2 - Quest rendering performance is unmeasured
 - Mobile renderer is the recommended XR path (4.7). Foveation on Vulkan Android and Application SpaceWarp on Quest and Pico since 4.5 ([vendors plugin](https://godotengine.org/article/godot-openxr-vendors-plugin-400/)), Vulkan subsampled images since 4.7 ([vr.org](https://vr.org/articles/godot-4-7-xr-steam-frame-android-xr-open-source-2026)).
 - No automatic 3D batching: one draw call per mesh surface, only MultiMesh draws many in one call ([guide](https://www.strayspark.studio/blog/godot-3d-optimization-guide-2026)). Unity's SRP batcher at least lowers the CPU cost per draw.
 - Meta's budget for Quest 3: 400-600 draw calls for a medium scene ([Meta](https://developers.meta.com/vr/documentation/unreal/unreal-debug-android/)). Gothic worlds with thousands of objects need merging and instancing, which is our job.
 - No public Godot Quest benchmarks ([forum](https://forum.godotengine.org/t/quest-3-standalone-forward-mobile-or-compatibility-for-a-3d-vr-project-in-godot-4-6/136328)).
-- Status: **open**. Baseline to beat: Gothic-Unity on Quest 3, G1 72 Hz avg 70.4 FPS, G2 120 Hz avg 98.8 FPS (2026-11-03).
+- Measured on the Quest 3 (2026-11-07): GPU bound, 10 ms app GPU at 120 Hz when everything is drawn to the horizon; with an 80 m object distance and 40 m particle distance 71.5 FPS at 72 Hz, 90.7 at 90 Hz, 115.8 at 120 Hz, 240-360 draw calls. Alpha tested trees and per-emitter particle simulation are the big costs. See [[Work-Log]].
+- Status: **measured**, G1 Old Camp passes. Baseline: Gothic-Unity on Quest 3, G1 72 Hz avg 70.4 FPS, G2 120 Hz avg 98.8 FPS (2026-11-03). Still open: G2 Khorinis, Quest 2, occlusion culling.
 
 ### R3 - Occlusion culling
 - Gothic-Unity uses Unity's baked occlusion data per world (Umbra, shipped in a binary package). Godot has occluders (baked in the editor, or set at runtime as arrays) and culls on the CPU.

@@ -11,9 +11,17 @@ namespace GothicGodot.Spike
     {
         private readonly Dictionary<string, string> _values = new();
 
+        // Godot drops launch arguments for exported Android activities, so the Quest reads them from a file.
+        private const string _androidArgsFile = "/storage/emulated/0/Android/data/com.gothic.godot/files/spike-args.txt";
+
         public SpikeArgs()
         {
-            foreach (var arg in OS.GetCmdlineUserArgs())
+            var args = new List<string>(OS.GetCmdlineUserArgs());
+            if (OS.GetName() == "Android" && System.IO.File.Exists(_androidArgsFile))
+                args.AddRange(System.IO.File.ReadAllText(_androidArgsFile)
+                    .Split((char[])null, System.StringSplitOptions.RemoveEmptyEntries));
+
+            foreach (var arg in args)
             {
                 var trimmed = arg.TrimStart('-');
                 var split = trimmed.IndexOf('=');

@@ -20,6 +20,12 @@ Go if the Old Camp scene on the Quest 3
 
 No-go items get a fix path in [[Godot-Risks]] or end the study.
 
+## Result so far (2026-11-07)
+
+- Native libraries, world, objects, humans, particles: done on desktop and Quest 3.
+- Go criteria for the Old Camp on the Quest 3: 72 Hz held (71.5 average), CPU 19-25%, no garbage collection, 239-360 draw calls. **Go** for rendering and animation.
+- Not yet measured: game logic (Daedalus VM, AI, physics of NPCs, audio), G2 Khorinis, Quest 2, Mono AOT / NativeAOT variants.
+
 ## Baseline (Gothic-Unity, Quest 3, 2026-11-03)
 
 - G1 72 Hz: average 70.4 FPS, app GPU 3.7-8.2 ms of 13.9 ms, drops are CPU spikes.

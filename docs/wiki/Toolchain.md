@@ -16,6 +16,15 @@
 
 ## Android / Quest
 
+Traps found while getting the spike onto the Quest 3:
+- The prebuilt Android template (no gradle) needs the C# project on net9.0 and contains no OpenXR loader and no VR launch category: the Quest starts it as a flat panel. Use the gradle build with the OpenXR vendors plugin (Meta plugin on).
+- The Meta plugin adds hand tracking only when the project setting `xr/openxr/extensions/hand_tracking` exists; Godot 4.7 no longer defines it, so the project sets it by hand.
+- Without optional hand tracking, a launch with sleeping controllers hangs on "controller required" (`LaunchCheckControllerRequiredDialogActivity`); its task blocks every later launch until removed (`adb shell am stack remove <task>`, the bench script does it).
+- Godot drops launch arguments of exported Android activities, so the spike reads its arguments from `files/spike-args.txt` in its app folder.
+- The refresh rate follows `debug.oculus.refreshRate` (left at 120 by earlier tests, lost on reboot); requesting a rate from the app before the session runs fell back to 120 Hz.
+- `--install-android-build-template` did nothing headless; the template is unzipped by hand into `android/build` (plus `android/.build_version`), gradle's heap lowered to 2 GB in `android/build/gradle.properties`.
+- `tools/quest-bench.sh <seconds> [args]` launches, waits for the world, samples VrApi and the spike's lines and prints a summary.
+
 - Android SDK with build tools 36.1.0 and platform 36, JDK 17, set in Godot's editor settings.
 - Gradle build (`--install-android-build-template`) and the vendors plugin with the Meta plugin enabled are needed for a Quest build; the prebuilt template has no OpenXR loader.
 - Export: `godot --headless --path Godot --export-debug "Quest" ../Builds/Quest/GothicGodot.apk`
