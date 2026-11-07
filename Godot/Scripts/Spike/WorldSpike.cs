@@ -52,7 +52,8 @@ namespace GothicGodot.Spike
 
             var groundLight = new GroundLightSampler();
             var builder = new WorldChunkBuilder();
-            builder.Build(mesh, textures, _args.CellSize, worldRoot, kind => materials[(int)kind], groundLight);
+            var polygonIds = WorldChunkBuilder.GetLeafPolygons(world.BspTree.Cache());
+            builder.Build(mesh, polygonIds, textures, _args.CellSize, worldRoot, kind => materials[(int)kind], groundLight);
             Log($"world mesh built in {watch.ElapsedMilliseconds} ms: {builder.ChunkCount} chunks, " +
                 $"{builder.TriangleCount} triangles, {textures.LayerCount} texture layers, {textures.MissingCount} missing");
 

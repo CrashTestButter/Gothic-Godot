@@ -13,7 +13,7 @@ First Gothic 1 world in Godot 4.7.2 (C#, Mobile renderer), desktop, rendered hea
 ![From the south](images/old-camp-overview-south.png)
 
 What is in it:
-- World mesh from ZenKit, cut into 64 m cells per kind (opaque, alpha tested, water): 636 meshes, 136k triangles.
+- World mesh from ZenKit, only the polygons the BSP leaves reference (like Gothic and Gothic-Unity), cut into 64 m cells per kind (opaque, alpha tested, water): 636 meshes, 107k triangles.
 - 7214 static objects (.3DS / MRM), 271 shared meshes, one node each.
 - One texture array (409 layers of 256 px, every texture scaled to the layer size) shared by everything.
 - Gothic's baked vertex light on the world; objects take the light of the world below them (like Gothic's ground polygon light), plus a little sun shading.
@@ -22,6 +22,7 @@ What is in it:
 Not in it: NPCs and animated models, mobs (.ASC), decals, particles, Gothic's sky, light maps of rooms, day time.
 
 Findings:
+- The world mesh holds 32565 polygons (of 138215) that no BSP leaf references: low detail copies overlapping the real geometry. The first renders drew them and got slanted slabs around the castle ("the height map gets funky around the center"). Drawing only BSP leaf polygons fixed it.
 - ZenKit works unchanged in Godot C# (.NET 8 desktop): VFS, world, meshes, textures. Native library resolution through `NativeLibrary.SetDllImportResolver`.
 - Loading on the desktop: world 1.1 s, world mesh 1 s, objects 0.3 s, texture array 0.1 s.
 - Managed memory 910 MB after loading, mostly the cached ZenKit world mesh and the builder lists. Too much for a Quest; the port needs Gothic-Unity's static cache approach (or streaming).

@@ -48,8 +48,30 @@ namespace GothicGodot.Spike
 
         public static Vector3 ToGodot(System.Numerics.Vector3 gothic) => new(gothic.X / 100f, gothic.Y / 100f, -gothic.Z / 100f);
 
-        public void Build(IMesh mesh, TextureArrayBuilder textures, float cellSize, Node3D parent,
-            Func<Kind, Material> getMaterial, GroundLightSampler groundLight = null)
+        /// <summary>
+        /// Gothic draws only the polygons its BSP leaves reference. The world mesh also holds about a quarter more:
+        /// low detail copies that overlap the real geometry (G1: 32565 of 138215).
+        /// </summary>
+        public static List<int> GetLeafPolygons(IBspTree bspTree)
+        {
+            var polygonIndices = bspTree.PolygonIndices;
+            var used = new HashSet<int>();
+            var result = new List<int>();
+            foreach (var leaf in bspTree.LeafNodeIndices)
+            {
+                var node = bspTree.GetNode(leaf);
+                for (var i = node.PolygonIndex; i < node.PolygonIndex + node.PolygonCount; i++)
+                {
+                    if (used.Add(polygonIndices[i]))
+                        result.Add(polygonIndices[i]);
+                }
+            }
+
+            return result;
+        }
+
+        public void Build(IMesh mesh, IReadOnlyList<int> polygonIds, TextureArrayBuilder textures, float cellSize,
+            Node3D parent, Func<Kind, Material> getMaterial, GroundLightSampler groundLight = null)
         {
             var materials = new MaterialInfo[mesh.MaterialCount];
             for (var i = 0; i < materials.Length; i++)
@@ -68,8 +90,9 @@ namespace GothicGodot.Spike
             var positions = mesh.Positions;
             var features = mesh.Features;
 
-            foreach (var polygon in polygons)
+            foreach (var polygonId in polygonIds)
             {
+                var polygon = polygons[polygonId];
                 if (polygon.IsPortal || polygon.IsGhostOccluder || polygon.PositionIndices.Count < 3)
                     continue;
 
