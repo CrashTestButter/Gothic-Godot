@@ -8,6 +8,8 @@ Newest first.
 ![Guard on the palisade](images/old-camp-palisade-guard.png)
 ![Hut fire at dusk](images/old-camp-hut-fire-dusk.png)
 ![Shadow at a hut door](images/old-camp-hut-door.png)
+![Castle torches at dusk](images/old-camp-castle-torches-dusk.png)
+![Campfire with a scavenger on the spit](images/old-camp-campfire-dusk.png)
 
 - **Humans**: HUMANS.MDH skeleton (34 bones) as a Skeleton3D, armours and bodies (.MDM soft skin) as skinned meshes with one Skin binding every node, heads (.MMB) on a BoneAttachment3D at "BIP01 HEAD", Gothic animations (.MAN: S_RUN, S_LGUARD, S_HGUARD, S_SIT) baked per frame and written bone by bone from C# every frame. Spawned at Old Camp waypoints, feet put on the ground by a ray.
 - Armours are modelled in another pose than the skeleton: their soft skin positions are 13-19 cm (guard armour) or 3-4 cm (shadow armour) off the rest pose, only the naked body matches. The first renders used them and the guards' arms looked off. Vertices now come from the weights' own bone offsets (sum of weight x bone rest x offset), like the engine and Gothic-Unity's armour position cache.
