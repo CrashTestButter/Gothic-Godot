@@ -1,3 +1,4 @@
+using System;
 using Godot;
 
 namespace GothicGodot.Interaction
@@ -15,8 +16,14 @@ namespace GothicGodot.Interaction
         public bool IsHeld { get; private set; }
 
         /// <param name="far">Hidden beyond this many metres (0: always drawn); items are small, each one is a draw.</param>
-        public void Setup(Mesh mesh, Shape3D shape, Vector3 shapeOffset, Color tint, float far)
+        private Func<(Shape3D, Vector3)> _hull;
+        private CollisionShape3D _collider;
+
+        /// <param name="hull">The exact shape, made the first time the item is taken (a box until then).</param>
+        public void Setup(Mesh mesh, Shape3D shape, Vector3 shapeOffset, Color tint, float far,
+            Func<(Shape3D, Vector3)> hull = null)
         {
+            _hull = hull;
             CollisionLayer = PhysicsLayers.Items;
             CollisionMask = PhysicsLayers.World | PhysicsLayers.Mobs | PhysicsLayers.Items;
             Mass = 0.5f;
@@ -29,11 +36,20 @@ namespace GothicGodot.Interaction
             };
             AddChild(instance);
             instance.SetInstanceShaderParameter("tint", tint);
-            AddChild(new CollisionShape3D { Shape = shape, Position = shapeOffset });
+            _collider = new CollisionShape3D { Shape = shape, Position = shapeOffset };
+            AddChild(_collider);
         }
 
         public void Take()
         {
+            if (_hull != null)
+            {
+                var (shape, offset) = _hull();
+                _collider.Shape = shape;
+                _collider.Position = offset;
+                _hull = null;
+            }
+
             IsHeld = true;
             Freeze = true;
         }

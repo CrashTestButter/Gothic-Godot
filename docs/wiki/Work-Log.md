@@ -23,6 +23,8 @@ What changed:
 
 Both suites pass after each step (18 of 18).
 
+Loading, profiled the same way: G2 took 9.6 s on the desktop up to the texture upload, 3.7 s of it in building the 2331 items - Godot's convex hull with simplification for each of ~300 item shapes (3.1 s). Items now get a box from their bounds at load (enough while they lie frozen and for the hands to find them) and the exact hull the first time a hand takes one: items 3.7 -> 0.3 s, **load 9.6 -> 6.1 s**. What is left: world polygons 1.3 s, merging the objects 1.4 s, the AI's script instances 0.9 s, chunk meshes and the world's collision (878k triangles) 1.8 s - candidates for threads or a cache on the Quest.
+
 ## 2026-11-07 - Textures after loading, the scripts' items
 
 - The texture array is uploaded once, so a surface whose texture first shows up later (a reward item, an item nobody carried at load) got a wrong layer. Such surfaces now get a material of their own with just that texture (one more draw call each, but only for those). `GOTHIC_LATE_TEXTURES=1` sends every item made after loading down that path to check it: the ore nugget and the potion render the same.
