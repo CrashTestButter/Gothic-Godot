@@ -2,6 +2,16 @@
 
 Newest first.
 
+## 2026-11-07 - All NPCs live, bodies only near the camera
+
+Until now only the NPCs within 150 m of the start ever showed up; the rest of the world stayed empty. Now it works like the engine's spawn and routine managers, as culling that keeps the world alive:
+
+- Every NPC the scripts insert (G2: 1054, G1: 137) stands at its routine's waypoint from the start.
+- Within 150 m of the hero an NPC is in the world with its AI (state, actions, perceptions); it leaves at 180 m and stops. Out of range it only follows its routine: at each switch it is put at the new entry's waypoint, like Gothic's routine manager (`[Ai] 12:30 9 NPCs change to their next routine entry, 5 out of range moved to it`). Coming back into range it starts its routine's state like a newly inserted NPC.
+- Its body (skeleton, mesh, hitbox, drawn weapon) exists only within 90 m of the camera (the animation distance and 10 m) and goes at 110 m; two bodies are made a frame at most, nearest first. The AI never needed the body: positions, facing, clips and states are its own data.
+- G2 at the start: 227 NPCs active, 153 with a body (before: 239 with bodies and AI); AI and animation cost per frame unchanged.
+- `--presence-test` (in both suites now): the hero goes to an NPC more than 300 m away - G2 a farmer, G1 Diego at the game's start, who then starts his first dialog like in the original - it comes in with its body, the start's NPCs stop (G2: 1 of 227 still active, 0 bodies); back at the start they all come back.
+
 ## 2026-11-07 - Optimization round 3: fewer draw calls, collision after loading
 
 | Desktop | before | after |

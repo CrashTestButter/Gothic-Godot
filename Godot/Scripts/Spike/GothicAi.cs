@@ -30,6 +30,9 @@ namespace GothicGodot.Spike
         private readonly List<GothicNpc> _npcs = new();
         private readonly Dictionary<int, GothicNpc> _npcBySymbol = new();
         private readonly List<GothicNpc> _inserted = new();
+
+        /// <summary>Every NPC the scripts inserted, in the world or out of range.</summary>
+        public IReadOnlyList<GothicNpc> Inserted => _inserted;
         private readonly Dictionary<Area3D, GothicNpc> _npcByHitbox = new();
 
         /// <summary>The NPC a physics query hit (its hitbox area).</summary>
@@ -127,7 +130,7 @@ namespace GothicGodot.Spike
             if (perc != null)
                 _percAssessPlayer = perc.GetInt(0, null);
 
-            _hero = new GothicNpc { Name = "Hero", Root = new Node3D { Name = "Hero" } };
+            _hero = new GothicNpc { Name = "Hero", Root = new Node3D { Name = "Hero" }, IsActive = true };
             AddChild(_hero.Root);
             _hero.Root.GlobalPosition = heroPosition;
             _hero.SyncPosition();
@@ -148,15 +151,11 @@ namespace GothicGodot.Spike
             if (startup != null)
                 Measure(() => _vm.Call(startup.Index));
 
-            // Every inserted NPC exists as a script instance (Hlp_GetNpc finds it); only those near get a body and AI.
-            var center = heroPosition;
-            foreach (var npc in _inserted)
-            {
-                if (!_waypoints.TryGetValue(npc.SpawnWaypoint ?? "", out var spawnPosition) ||
-                    spawnPosition.DistanceTo(center) > radius)
-                    continue;
-                Spawn(npc);
-            }
+            // Every inserted NPC exists as a script instance (Hlp_GetNpc finds it) and stands at its routine's
+            // waypoint; those near the hero get their AI, those near the camera their body (all at once at load).
+            _aiRadius = radius;
+            UpdatePresence(heroPosition, heroPosition);
+            CreateQueuedBodies(int.MaxValue);
 
             Dialog = new GothicDialog(_vm, vfs, this, dataPath);
             // G2's scripts have ITPO_HEALTH_01 (G1: ItFo_Potion_Health_01): the game decides the damage rules.
@@ -166,13 +165,17 @@ namespace GothicGodot.Spike
             if (_leftOut.Count > 0)
                 GD.Print("[Ai] left out: " + string.Join(", ", _leftOut.Select(l => $"{l.Key} x{l.Value}")));
             _world = null;
-            GD.Print($"[Ai] {startupFunction} inserted {_inserted.Count} NPCs, {_npcs.Count} within {radius} m spawned at " +
+            GD.Print($"[Ai] {startupFunction} inserted {_inserted.Count} NPCs, {_npcs.Count} within {radius} m active, " +
+                     $"{_npcs.Count(n => n.HasBody)} with a body (within {BodyNear} m) at " +
                      $"{hour:00}:00 ({_monsters} monsters of {_factories.Count(f => f.Value != null)} models, {_skippedMonsters} left out), routines {_npcs.Sum(n => n.Routine.Count)} entries, " +
-                     $"{(float)_surfaces / Math.Max(1, _npcs.Count):F1} surfaces (draw calls) per NPC");
+                     $"{(float)_surfaces / Math.Max(1, _bodies):F1} surfaces (draw calls) per NPC");
         }
 
         private readonly Dictionary<string, ModelFactory> _factories = new(StringComparer.OrdinalIgnoreCase);
         private int _surfaces;
+        private int _bodies;
+        private int _bodiesMade;
+        private int _bodiesRemoved;
         private readonly Dictionary<string, int> _leftOut = new();
 
         private void NoteLeftOut(string reason)
@@ -315,24 +318,143 @@ namespace GothicGodot.Spike
             _vm.GlobalSelf = self;
             _inserted.Add(npc);
             _npcBySymbol[instanceIndex] = npc;
+            Place(npc);
         }
 
-        /// <summary>Body, animation and AI for an inserted NPC near the hero.</summary>
-        private void Spawn(GothicNpc npc)
-        {
-            var waypoint = npc.SpawnWaypoint;
+        private float _aiRadius = 150f;
 
-            // Humans and monsters (wolves, sheep, ...): each model with its own skeleton and animations.
-            var factory = GetFactory(npc.Visual);
-            if (factory == null)
+        /// <summary>
+        /// Bodies are made this near the camera (the animation distance and a margin; all active NPCs without one)
+        /// and taken away 20 m further out.
+        /// </summary>
+        public float BodyNear => AnimationFar > 0 ? AnimationFar + 10f : float.MaxValue;
+
+        private const float _aiLeaveMargin = 30f;
+        private const float _bodyLeaveMargin = 20f;
+        private const double _presenceInterval = 0.25;
+        private const int _bodiesPerFrame = 2;
+        private double _presenceTime;
+        private readonly List<GothicNpc> _bodyQueue = new();
+
+        /// <summary>Like the engine on world start: at the waypoint of the routine entry that runs now.</summary>
+        private void Place(GothicNpc npc)
+        {
+            var index = ActiveRoutineIndex(npc);
+            npc.RoutineIndex = index;
+            var routineWaypoint = index >= 0 ? npc.Routine[index].Waypoint : null;
+            if (routineWaypoint != null && _waypoints.TryGetValue(routineWaypoint, out var position) ||
+                _waypoints.TryGetValue(npc.SpawnWaypoint ?? "", out position))
+                npc.SetPosition(position);
+            else
+                npc.IsLeftOut = true;
+        }
+
+        /// <summary>
+        /// AI for the NPCs near the hero, bodies for those near the camera, with margins so nobody flickers in and out;
+        /// the NPCs further away only follow their routine (<see cref="SetMinute"/>). Bodies are queued nearest first.
+        /// </summary>
+        private void UpdatePresence(Vector3 hero, Vector3 camera)
+        {
+            _bodyQueue.Clear();
+            var bodyNear = BodyNear;
+            foreach (var npc in _inserted)
             {
-                NoteLeftOut($"model {npc.Visual}");
-                return;
+                if (npc.IsLeftOut)
+                    continue;
+                var toHero = npc.Position.DistanceTo(hero);
+                if (!npc.IsActive && toHero <= _aiRadius)
+                    Activate(npc);
+                else if (npc.IsActive && toHero > _aiRadius + _aiLeaveMargin && !npc.IsInDialog)
+                    Deactivate(npc);
+                if (!npc.IsActive)
+                    continue;
+
+                var toCamera = npc.Position.DistanceTo(camera);
+                if (!npc.HasBody && toCamera <= bodyNear)
+                    _bodyQueue.Add(npc);
+                else if (npc.HasBody && toCamera > bodyNear + _bodyLeaveMargin)
+                    RemoveBody(npc);
             }
 
-            npc.Factory = factory;
-            npc.IdleClip = factory.GetClip("S_RUN") != null ? "S_RUN" : "S_FISTRUN";
-            npc.WalkClip = factory.GetClip("S_WALKL") != null ? "S_WALKL" : "S_FISTWALKL";
+            _bodyQueue.Sort((a, b) => b.Position.DistanceSquaredTo(camera).CompareTo(a.Position.DistanceSquaredTo(camera)));
+        }
+
+        private void CreateQueuedBodies(int count)
+        {
+            for (var n = 0; n < count && _bodyQueue.Count > 0; n++)
+            {
+                var npc = _bodyQueue[^1];
+                _bodyQueue.RemoveAt(_bodyQueue.Count - 1);
+                if (npc.IsActive && !npc.HasBody)
+                    CreateBody(npc);
+            }
+        }
+
+        /// <summary>Into the world with its AI: it starts its routine's state like a newly inserted NPC.</summary>
+        private bool Activate(GothicNpc npc)
+        {
+            if (npc.Factory == null)
+            {
+                // Humans and monsters (wolves, sheep, ...): each model with its own skeleton and animations.
+                var factory = GetFactory(npc.Visual);
+                if (factory == null)
+                {
+                    NoteLeftOut($"model {npc.Visual}");
+                    npc.IsLeftOut = true;
+                    return false;
+                }
+
+                npc.Factory = factory;
+                npc.IdleClip = factory.GetClip("S_RUN") != null ? "S_RUN" : "S_FISTRUN";
+                npc.WalkClip = factory.GetClip("S_WALKL") != null ? "S_WALKL" : "S_FISTWALKL";
+                if (factory != _factory)
+                    _monsters++;
+            }
+
+            npc.IsActive = true;
+            if (!npc.IsDead)
+            {
+                npc.State = GothicNpc.LoopState.None;
+                PlayClip(npc, npc.IdleClip, true);
+            }
+
+            npc.NextPerceptionTime = _time + _random.NextDouble() * 2.0;
+            _npcs.Add(npc);
+            return true;
+        }
+
+        /// <summary>Out of the hero's range: it stops and only follows its routine's waypoints from now on.</summary>
+        private void Deactivate(GothicNpc npc)
+        {
+            npc.IsActive = false;
+            _npcs.Remove(npc);
+            if (!npc.IsDead)
+            {
+                npc.Actions.Clear();
+                npc.Current = null;
+                npc.PendingState = 0;
+                npc.Perceptions.Clear();
+                npc.State = GothicNpc.LoopState.None;
+            }
+
+            RemoveBody(npc);
+        }
+
+        private void RemoveBody(GothicNpc npc)
+        {
+            if (!npc.HasBody)
+                return;
+            if (npc.Hitbox != null)
+                _npcByHitbox.Remove(npc.Hitbox);
+            npc.Root.QueueFree();
+            npc.DetachBody();
+            _bodiesRemoved++;
+        }
+
+        /// <summary>The body of an active NPC near the camera: skeleton, mesh (head included), hitbox, drawn weapon.</summary>
+        private void CreateBody(GothicNpc npc)
+        {
+            var factory = npc.Factory;
             var armorMdm = factory == _factory ? GetArmorMdm(npc.ArmorInstance) : null;
             var bodyMdm = armorMdm ?? $"{npc.Body.ToUpperInvariant()}.MDM";
             // Humans: the head in the body's mesh, skinned to the head bone - one draw call per NPC.
@@ -348,22 +470,17 @@ namespace GothicGodot.Spike
             if (body == null)
             {
                 NoteLeftOut($"body {bodyMdm} of {factory.Model}");
+                Deactivate(npc);
+                npc.IsLeftOut = true;
                 return;
             }
 
-            if (factory != _factory)
-                _monsters++;
-
-            npc.Root = new Node3D { Name = npc.SymbolName };
-            AddChild(npc.Root);
-            // Like the engine on world start: at the waypoint of the routine entry that runs now.
-            var current = npc.Routine.FirstOrDefault(r => IsActive(r, _minuteOfDay));
-            npc.SetPosition(current.Waypoint != null && _waypoints.TryGetValue(current.Waypoint, out var routinePosition)
-                ? routinePosition
-                : _waypoints[waypoint]);
+            var root = new Node3D { Name = npc.SymbolName };
+            AddChild(root);
+            npc.AttachBody(root);
             npc.Skeleton = factory.CreateSkeleton();
             npc.Root.AddChild(npc.Skeleton);
-            var tint = _light.Sample(npc.Root.GlobalPosition, new Color(0.6f, 0.6f, 0.6f));
+            var tint = _light.Sample(npc.Position, new Color(0.6f, 0.6f, 0.6f));
             var bodyInstance = new MeshInstance3D { Mesh = body, Skin = factory.Skin };
             npc.Skeleton.AddChild(bodyInstance);
             bodyInstance.Skeleton = bodyInstance.GetPathTo(npc.Skeleton);
@@ -395,9 +512,10 @@ namespace GothicGodot.Spike
             npc.Hitbox.SetMeta("npc", npc.SymbolName);
             _npcByHitbox[npc.Hitbox] = npc;
 
-            PlayClip(npc, npc.IdleClip, true);
-            npc.NextPerceptionTime = _random.NextDouble() * 2.0;
-            _npcs.Add(npc);
+            if (npc.FightMode != 0)
+                DrawWeapon(npc, true);
+            _bodies++;
+            _bodiesMade++;
             _surfaces += body.GetSurfaceCount() + (head?.GetSurfaceCount() ?? 0);
         }
 
@@ -430,6 +548,16 @@ namespace GothicGodot.Spike
             Dialog?.Update(delta);
             Fight?.Update();
 
+            _presenceTime += delta;
+            if (_presenceTime >= _presenceInterval)
+            {
+                _presenceTime = 0;
+                var eye = GetViewport().GetCamera3D()?.GlobalPosition ?? HeroPosition;
+                UpdatePresence(HeroPosition, eye);
+            }
+
+            CreateQueuedBodies(_bodiesPerFrame);
+
             var aiMs = _frameWatch.Elapsed.TotalMilliseconds;
             _frameWatch.Restart();
             var camera = GetViewport().GetCamera3D();
@@ -448,6 +576,8 @@ namespace GothicGodot.Spike
             foreach (var npc in _npcs)
             {
                 npc.ClipTime += delta;
+                if (!npc.HasBody)
+                    continue;
                 if (AnimationFar <= 0 || camera == null)
                 {
                     Animate(npc);
@@ -481,7 +611,8 @@ namespace GothicGodot.Spike
                 return;
 
             var walking = _npcs.Count(n => n.Current is GothicNpc.GotoAction);
-            GD.Print($"[Ai] {_npcs.Count} NPCs ({walking} walking): AI {_aiMs / _frames:F2} ms per frame " +
+            GD.Print($"[Ai] {_npcs.Count} NPCs ({walking} walking, {_npcs.Count(n => n.HasBody)} with a body, " +
+                     $"{_bodiesMade} bodies made and {_bodiesRemoved} taken away so far): AI {_aiMs / _frames:F2} ms per frame " +
                      $"(VM {_vmMs / _frames:F2} ms; {_aiMs:F1} / {_vmMs:F1} ms per second), " +
                      $"animation {_boneMs / _frames:F2} ms ({_animatedSum / _frames} animated); per second " +
                      $"{_loops} state loops, {_perceptions} perceptions, {_externals + _defaultExternals} externals " +
@@ -611,8 +742,24 @@ namespace GothicGodot.Spike
                 switched++;
             }
 
-            if (switched > 0)
-                GD.Print($"[Ai] {minute / 60:00}:{minute % 60:00} {switched} NPCs change to their next routine entry");
+            // Out of range, like the engine's routine manager: straight to the new entry's waypoint.
+            var moved = 0;
+            foreach (var npc in _inserted)
+            {
+                if (npc.IsActive || npc.IsLeftOut || npc.IsDead || npc.Routine.Count == 0)
+                    continue;
+                var index = ActiveRoutineIndex(npc);
+                if (index < 0 || index == npc.RoutineIndex)
+                    continue;
+                npc.RoutineIndex = index;
+                if (_waypoints.TryGetValue(npc.Routine[index].Waypoint ?? "", out var position))
+                    npc.SetPosition(position);
+                moved++;
+            }
+
+            if (switched > 0 || moved > 0)
+                GD.Print($"[Ai] {minute / 60:00}:{minute % 60:00} {switched} NPCs change to their next routine entry, " +
+                         $"{moved} out of range moved to it");
         }
 
         private int ActiveRoutineIndex(GothicNpc npc)
@@ -1188,7 +1335,7 @@ namespace GothicGodot.Spike
 
         private void Animate(GothicNpc npc)
         {
-            if (npc.Clip == null)
+            if (npc.Clip == null || npc.Skeleton == null)
                 return;
             npc.Clip.Apply(npc.Skeleton, npc.ClipTime, npc.IsClipLooping, BoneMode == "pose", npc.AppliedClip != npc.Clip);
             npc.AppliedClip = npc.Clip;
@@ -1210,7 +1357,7 @@ namespace GothicGodot.Spike
             for (var i = 0; i <= _npcs.Count; i++)
             {
                 var other = i < _npcs.Count ? _npcs[i] : _hero;
-                if (other == self || other?.Root == null || other.Instance == null)
+                if (other == self || other == null || other.Instance == null)
                     continue;
                 if (!isPlayerDetected && other == _hero || instance >= 0 && other.Instance.Index != instance)
                     continue;
@@ -1335,7 +1482,7 @@ namespace GothicGodot.Spike
             _vm.RegisterExternal("Npc_GetDistToWP", (DaedalusVm.ExternalFunc<int, NpcInstance, string>)((npc, waypoint) =>
             {
                 _externals++;
-                if (Npc(npc)?.Root == null || !_waypoints.TryGetValue(waypoint ?? "", out var point))
+                if (Npc(npc) == null || !_waypoints.TryGetValue(waypoint ?? "", out var point))
                     return int.MaxValue;
                 return (int)(Npc(npc).Position.DistanceTo(point) * 100f);
             }));
@@ -1345,7 +1492,7 @@ namespace GothicGodot.Spike
                     _externals++;
                     var first = Npc(a);
                     var second = Npc(b);
-                    if (first?.Root == null || second?.Root == null)
+                    if (first == null || second == null)
                         return int.MaxValue;
                     return (int)(first.Position.DistanceTo(second.Position) * 100f);
                 }));
@@ -1482,7 +1629,7 @@ namespace GothicGodot.Spike
                 {
                     _externals++;
                     var target = Npc(npc);
-                    if (target?.Root != null)
+                    if (target?.IsActive == true)
                         Sfx?.Play3d(name, target.Position + Vector3.Up * 1.5f);
                 }));
 

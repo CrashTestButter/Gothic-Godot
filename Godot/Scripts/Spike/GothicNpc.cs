@@ -158,8 +158,22 @@ namespace GothicGodot.Spike
         /// </summary>
         public Vector3 Position => _position;
 
-        /// <summary>Shown (in animation range); kept here for the same reason.</summary>
-        public bool IsShown { get; private set; } = true;
+        private bool _isVisible = true;
+
+        /// <summary>Shown: it has a body and is in animation range; kept here for the same reason.</summary>
+        public bool IsShown => Root != null && _isVisible;
+
+        /// <summary>Its body (skeleton, mesh, hitbox) exists: only near the camera, like the engine's spawn range.</summary>
+        public bool HasBody => Root != null;
+
+        /// <summary>
+        /// In the world with its AI running, near the hero. The others only follow their routine: at each switch
+        /// they are put at the new entry's waypoint, like the engine's routine manager does for NPCs out of range.
+        /// </summary>
+        public bool IsActive;
+
+        /// <summary>Never in the world: no model, no body or no waypoint to stand at.</summary>
+        public bool IsLeftOut;
 
         private bool _isPositionDirty;
 
@@ -216,9 +230,15 @@ namespace GothicGodot.Spike
 
         public void SetShown(bool isShown)
         {
-            if (IsShown == isShown)
+            if (Root == null)
+            {
+                _isVisible = isShown;
                 return;
-            IsShown = isShown;
+            }
+
+            if (_isVisible == isShown)
+                return;
+            _isVisible = isShown;
             Root.Visible = isShown;
             if (isShown && _isPositionDirty)
             {
@@ -231,6 +251,28 @@ namespace GothicGodot.Spike
                 Root.Rotation = new Vector3(0, _yaw, 0);
                 _isYawDirty = false;
             }
+        }
+
+        /// <summary>Its body was made: it stands where the NPC is and plays its clip from the full pose.</summary>
+        public void AttachBody(Node3D root)
+        {
+            Root = root;
+            Root.Position = _position;
+            Root.Rotation = new Vector3(0, _yaw, 0);
+            Root.Visible = _isVisible;
+            _isPositionDirty = false;
+            _isYawDirty = false;
+            AppliedClip = null;
+        }
+
+        /// <summary>Its body was taken away (out of range); the NPC itself goes on.</summary>
+        public void DetachBody()
+        {
+            Root = null;
+            Skeleton = null;
+            Hitbox = null;
+            WeaponNode = null;
+            AppliedClip = null;
         }
     }
 }

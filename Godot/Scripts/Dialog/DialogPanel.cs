@@ -194,7 +194,7 @@ namespace GothicGodot.Dialog
             if (line.Voice == null)
                 return;
             _testVoices++;
-            if (line.IsHero || line.Speaker?.Root == null)
+            if (line.IsHero || line.Speaker == null)
             {
                 _heroVoice.Stream = line.Voice;
                 _heroVoice.Play();
@@ -458,7 +458,7 @@ namespace GothicGodot.Dialog
             }).CallDeferred();
         }
 
-        private string SymbolName(GothicNpc npc) => npc.Root?.Name.ToString().ToUpperInvariant();
+        private string SymbolName(GothicNpc npc) => npc.SymbolName?.ToUpperInvariant();
 
         private void Screenshot(string suffix)
         {
