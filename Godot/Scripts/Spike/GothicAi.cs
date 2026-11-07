@@ -29,7 +29,7 @@ namespace GothicGodot.Spike
         private GroundLightSampler _light;
         private readonly List<GothicNpc> _npcs = new();
         private readonly Dictionary<int, GothicNpc> _npcBySymbol = new();
-        private readonly List<(int Instance, string Waypoint)> _spawns = new();
+        private readonly List<GothicNpc> _inserted = new();
         private readonly Dictionary<string, Vector3> _waypoints = new(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, List<string>> _waynet = new(StringComparer.OrdinalIgnoreCase);
         private readonly Random _random = new(3);
@@ -105,18 +105,21 @@ namespace GothicGodot.Spike
             _hero.Instance = hero;
             _vm.InitInstance(hero);
             _vm.GlobalHero = hero;
+            GD.Print($"[Ai] hero after init: HP {hero.GetAttribute(NpcAttribute.HitPoints)} / " +
+                     $"{hero.GetAttribute(NpcAttribute.HitPointsMax)}, level {hero.Level}");
 
             var startup = _vm.GetSymbolByName(startupFunction);
             if (startup != null)
                 Measure(() => _vm.Call(startup.Index));
 
+            // Every inserted NPC exists as a script instance (Hlp_GetNpc finds it); only those near get a body and AI.
             var center = heroPosition;
-            foreach (var (instance, waypoint) in _spawns)
+            foreach (var npc in _inserted)
             {
-                if (!_waypoints.TryGetValue(waypoint ?? "", out var spawnPosition) ||
+                if (!_waypoints.TryGetValue(npc.SpawnWaypoint ?? "", out var spawnPosition) ||
                     spawnPosition.DistanceTo(center) > radius)
                     continue;
-                Spawn(instance, waypoint);
+                Spawn(npc);
             }
 
             Dialog = new GothicDialog(_vm, vfs, this, dataPath);
@@ -125,7 +128,7 @@ namespace GothicGodot.Spike
             if (_leftOut.Count > 0)
                 GD.Print("[Ai] left out: " + string.Join(", ", _leftOut.Select(l => $"{l.Key} x{l.Value}")));
             _world = null;
-            GD.Print($"[Ai] {startupFunction} inserted {_spawns.Count} NPCs, {_npcs.Count} within {radius} m spawned at " +
+            GD.Print($"[Ai] {startupFunction} inserted {_inserted.Count} NPCs, {_npcs.Count} within {radius} m spawned at " +
                      $"{hour:00}:00 ({_monsters} monsters of {_factories.Count(f => f.Value != null)} models, {_skippedMonsters} left out), routines {_npcs.Sum(n => n.Routine.Count)} entries");
         }
 
@@ -168,16 +171,23 @@ namespace GothicGodot.Spike
             list.Add(to);
         }
 
-        private void Spawn(int instanceIndex, string waypoint)
+        /// <summary>
+        /// Wld_InsertNpc: the NPC's script instance (attributes, inventory, look) and its daily routine, at once like the
+        /// engine - the startup script may change it right after (G2 kills some through Hlp_GetNpc).
+        /// </summary>
+        private void Insert(int instanceIndex, string waypoint)
         {
             var symbol = _vm.GetSymbolByIndex(instanceIndex);
             if (symbol == null || symbol.Type != DaedalusDataType.Instance)
                 return;
 
-            var npc = new GothicNpc { SpawnWaypoint = waypoint };
+            var npc = new GothicNpc { SpawnWaypoint = waypoint, SymbolName = symbol.Name };
             var instance = _vm.AllocInstance<NpcInstance>(symbol);
             instance.UserData = npc;
             npc.Instance = instance;
+            var self = _vm.GlobalSelf;
+            // The instance's code says self for the NPC being made.
+            _vm.GlobalSelf = instance;
             Measure(() => _vm.InitInstance(instance));
             npc.Name = instance.GetName(NpcNameSlot.Slot0);
 
@@ -187,6 +197,16 @@ namespace GothicGodot.Spike
                 _vm.GlobalSelf = instance;
                 Measure(() => _vm.Call(instance.DailyRoutine));
             }
+
+            _vm.GlobalSelf = self;
+            _inserted.Add(npc);
+            _npcBySymbol[instanceIndex] = npc;
+        }
+
+        /// <summary>Body, animation and AI for an inserted NPC near the hero.</summary>
+        private void Spawn(GothicNpc npc)
+        {
+            var waypoint = npc.SpawnWaypoint;
 
             // Humans and monsters (wolves, sheep, ...): each model with its own skeleton and animations.
             var factory = GetFactory(npc.Visual);
@@ -214,7 +234,7 @@ namespace GothicGodot.Spike
             if (factory != _factory)
                 _monsters++;
 
-            npc.Root = new Node3D { Name = $"{symbol.Name}" };
+            npc.Root = new Node3D { Name = npc.SymbolName };
             AddChild(npc.Root);
             // Like the engine on world start: at the waypoint of the routine entry that runs now.
             var current = npc.Routine.FirstOrDefault(r => IsActive(r, _minuteOfDay));
@@ -244,7 +264,6 @@ namespace GothicGodot.Spike
             PlayClip(npc, npc.IdleClip, true);
             npc.NextPerceptionTime = _random.NextDouble() * 2.0;
             _npcs.Add(npc);
-            _npcBySymbol[instanceIndex] = npc;
         }
 
         private string GetArmorMdm(int armorInstance)
@@ -467,6 +486,7 @@ namespace GothicGodot.Spike
             var gcBefore = GC.CollectionCount(0);
             var allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
             var symbol = _vm.GetSymbolByIndex(function);
+            _currentCall = $"{symbol.Name} of {npc.Name}";
             _vmWatch.Start();
             try
             {
@@ -710,6 +730,8 @@ namespace GothicGodot.Spike
         }
 
         private int? _consumableFlags;
+        private int _heroChangesLogged;
+        private string _currentCall;
 
         public bool HasClip(string name) => _factory.GetClip(name.ToUpperInvariant()) != null;
 
@@ -754,7 +776,7 @@ namespace GothicGodot.Spike
             _vm.RegisterExternal("Wld_InsertNpc", (DaedalusVm.ExternalFuncV<int, string>)((instance, waypoint) =>
             {
                 _externals++;
-                _spawns.Add((instance, waypoint));
+                Insert(instance, waypoint);
             }));
             _vm.RegisterExternal("Mdl_SetVisual", (DaedalusVm.ExternalFuncV<NpcInstance, string>)((npc, visual) =>
             {
@@ -875,7 +897,8 @@ namespace GothicGodot.Spike
                 _externals++;
                 if (_npcBySymbol.TryGetValue(instance, out var npc))
                     return npc.Instance;
-                return _hero?.Instance;
+                // The hero by his own instance; anyone else not inserted is no NPC (not the hero, as before).
+                return _hero?.Instance != null && instance == _hero.Instance.Index ? _hero.Instance : null;
             }));
             // Attributes live in the NpcInstance; HP and mana stay between 0 and their max (Gothic-Unity's rule).
             _vm.RegisterExternal("Npc_ChangeAttribute", (DaedalusVm.ExternalFuncV<NpcInstance, int, int>)((npc, attribute, value) =>
@@ -891,6 +914,8 @@ namespace GothicGodot.Spike
                         newValue = Math.Clamp(newValue, 0, max);
                 }
 
+                if (_hero?.Instance != null && npc.Index == _hero.Instance.Index && _heroChangesLogged++ < 10)
+                    GD.Print($"[Ai] hero attribute {(NpcAttribute)attribute} {value:+#;-#;0} -> {newValue} in {_currentCall ?? "-"}");
                 npc.SetAttribute((NpcAttribute)attribute, newValue);
             }));
             // Inventories (Gothic-Unity's VmExternalDomain signatures): scripts fill them on insert and in dialogs.

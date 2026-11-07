@@ -2,6 +2,11 @@
 
 Newest first.
 
+## 2026-11-07 - Fix: G2's hero started dead
+
+- The G2 hero showed 0 of 40 hit points. Cause: the spike created the startup script's NPCs only after the script had run, so its `Hlp_GetNpc` + `Npc_ChangeAttribute(npc, ATR_HITPOINTS, -max)` (three NPCs Gothic 2 starts dead) found no NPC, and `Hlp_GetNpc` fell back to the hero.
+- Now like the engine and Gothic-Unity: `Wld_InsertNpc` creates the NPC at once (script instance with self set to it, inventory, daily routine); only the NPCs near the hero get a body and AI afterwards. `Hlp_GetNpc` returns no NPC for an instance that wasn't inserted.
+
 ## 2026-11-07 - Chests
 
 ![An open chest in the Old Camp, a beer and arrows inside](images/chest-open.png)

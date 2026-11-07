@@ -47,6 +47,7 @@ namespace GothicGodot.Spike
         }
 
         public NpcInstance Instance;
+        public string SymbolName;
         public string Name;
         public string Visual;
         public string Body = "HUM_BODY_NAKED0";
