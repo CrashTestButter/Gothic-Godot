@@ -2,6 +2,16 @@
 
 Newest first.
 
+## 2026-11-07 - The bag: put items away, take them out
+
+![The hero's bag in front of the eyes](images/bag-open.png)
+
+- Inventories for the hero and every NPC, filled by the scripts through Gothic's externals (CreateInvItem(s), Npc_RemoveInvItem(s), Npc_HasItems, with Gothic-Unity's signatures), so dialogs that give or take items and conditions that ask for them work. The hero starts with what his script instance gives him (G1: the sealed letter, scrolls, potions, books, weapons, 200 ore nuggets).
+- Putting away: let go of an item over the shoulder (XR, like Gothic-Unity's backpack: within 30 cm of a point behind and below the head) or press B while holding it (desktop).
+- Taking out: Y or the left menu button (XR) / Tab (desktop) opens the list in front of the eyes, names from the item scripts with amounts; point or use the right stick (XR), arrow keys / W / S / 1-9 (desktop); the trigger / Enter puts one item into the right hand. Closed during dialogs.
+- `--grab-test=bag`: takes the nearest item, puts it away (amount +1), opens the bag, takes it out into the hand (amount -1), throws it. Passes in the Old Camp with the AI on.
+- Not in it yet: Gothic's categories and the inventory screen, using items (eating, drinking, reading), equipping weapons and armour, trading, chests.
+
 ## 2026-11-07 - The hero's hands
 
 ![The hero's right hand holding an ore nugget (desktop)](images/hand-holding-nugget.png)

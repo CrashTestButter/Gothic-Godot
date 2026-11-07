@@ -804,6 +804,33 @@ namespace GothicGodot.Spike
                     return npc.Instance;
                 return _hero?.Instance;
             }));
+            // Inventories (Gothic-Unity's VmExternalDomain signatures): scripts fill them on insert and in dialogs.
+            _vm.RegisterExternal("CreateInvItem", (DaedalusVm.ExternalFuncV<NpcInstance, int>)((npc, item) =>
+            {
+                _externals++;
+                Npc(npc)?.Inventory.Add(_vm.GetSymbolByIndex(item)?.Name);
+            }));
+            _vm.RegisterExternal("CreateInvItems", (DaedalusVm.ExternalFuncV<NpcInstance, int, int>)((npc, item, amount) =>
+            {
+                _externals++;
+                Npc(npc)?.Inventory.Add(_vm.GetSymbolByIndex(item)?.Name, amount);
+            }));
+            _vm.RegisterExternal("Npc_RemoveInvItem", (DaedalusVm.ExternalFuncV<NpcInstance, int>)((npc, item) =>
+            {
+                _externals++;
+                Npc(npc)?.Inventory.Remove(_vm.GetSymbolByIndex(item)?.Name);
+            }));
+            _vm.RegisterExternal("Npc_RemoveInvItems", (DaedalusVm.ExternalFuncV<NpcInstance, int, int>)((npc, item, amount) =>
+            {
+                _externals++;
+                Npc(npc)?.Inventory.Remove(_vm.GetSymbolByIndex(item)?.Name, amount);
+            }));
+            _vm.RegisterExternal("Npc_HasItems", (DaedalusVm.ExternalFunc<int, NpcInstance, int>)((npc, item) =>
+            {
+                _externals++;
+                var name = _vm.GetSymbolByIndex(item)?.Name;
+                return name != null ? Npc(npc)?.Inventory[name] ?? 0 : 0;
+            }));
             _vm.RegisterExternal("Hlp_IsValidNpc", (DaedalusVm.ExternalFunc<int, NpcInstance>)(npc =>
             {
                 _externals++;

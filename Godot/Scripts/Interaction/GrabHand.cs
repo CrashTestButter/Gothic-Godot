@@ -91,6 +91,27 @@ namespace GothicGodot.Interaction
             Grabbed?.Invoke(item);
         }
 
+        /// <summary>Puts the item into this hand (taken out of the inventory): at the grip point, turned like the hand.</summary>
+        public void Hold(WorldItem item)
+        {
+            if (Held != null)
+                return;
+            Held = item;
+            item.Take();
+            item.GlobalTransform = GlobalTransform;
+            _offset = Transform3D.Identity;
+            _wasGripDown = ForcedGrip ?? IsGripDown?.Invoke() ?? false;
+            Grabbed?.Invoke(item);
+        }
+
+        /// <summary>Empties the hand without throwing (the item goes into the inventory).</summary>
+        public WorldItem TakeAway()
+        {
+            var item = Held;
+            Held = null;
+            return item;
+        }
+
         private void Release()
         {
             if (Held == null)

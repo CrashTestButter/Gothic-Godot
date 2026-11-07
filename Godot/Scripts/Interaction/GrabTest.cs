@@ -7,7 +7,8 @@ namespace GothicGodot.Interaction
     /// <summary>
     /// Scripted grab test without a headset (--grab-test): the desktop player walks up to the nearest item, takes it
     /// (right hand), turns while holding it, lets go and checks that it flew and landed. Screenshots while holding and
-    /// after landing, then quits.
+    /// after landing, then quits. With the bag (--grab-test=bag) it puts the item away instead of throwing it, opens
+    /// the bag, takes the item out into the hand again and checks the amounts.
     /// </summary>
     public partial class GrabTest : Node
     {
@@ -19,12 +20,14 @@ namespace GothicGodot.Interaction
         private WorldItem _item;
         private Vector3 _start;
         private Vector3 _releasedAt;
+        private InventoryPanel _bag;
 
-        public void Init(GothicPlayer player, Node3D items, string screenshot)
+        public void Init(GothicPlayer player, Node3D items, string screenshot, InventoryPanel bag = null)
         {
             _player = player;
             _items = items;
             _screenshot = screenshot;
+            _bag = bag;
         }
 
         public override void _PhysicsProcess(double delta)
@@ -71,6 +74,8 @@ namespace GothicGodot.Interaction
                              "from where it lay");
                     Screenshot("held");
                     Next();
+                    if (_bag != null)
+                        _step = 10;
                     break;
                 case 3:
                     // Swing to the right for 0.6 s, let go while turning: a throw.
@@ -95,6 +100,41 @@ namespace GothicGodot.Interaction
                     break;
                 case 6 when _time > 0.3:
                     Finish("done", 0);
+                    break;
+
+                // With the bag: put away, open, take out again.
+                case 10 when _time > 0.3:
+                    var instance = _item.Instance;
+                    var before = _bag.Inventory[instance];
+                    if (!_bag.Stow(grab) || _bag.Inventory[instance] != before + 1 || grab.Held != null)
+                    {
+                        Finish($"not put away ({_bag.Inventory[instance]} in the bag)", 1);
+                        return;
+                    }
+
+                    _bag.Open();
+                    GD.Print($"[GrabTest] bag: {string.Join(", ", _bag.Inventory.Items.Select(i => $"{_bag.GetName(i)} x{_bag.Inventory[i]}"))}");
+                    Next();
+                    break;
+                case 11 when _time > 0.5:
+                    Screenshot("bag");
+                    var index = _bag.Inventory.Items.ToList().FindIndex(i => i == _item.Instance.ToUpperInvariant());
+                    grab.ForcedGrip = true;
+                    if (!_bag.TakeOut(index, grab) || grab.Held == null)
+                    {
+                        Finish("not taken out", 1);
+                        return;
+                    }
+
+                    _item = grab.Held;
+                    GD.Print($"[GrabTest] {_bag.GetName(_item.Instance)} back in the hand, {_bag.Inventory[_item.Instance]} left in the bag");
+                    _bag.Close();
+                    Next();
+                    break;
+                case 12 when _time > 0.5:
+                    Screenshot("taken-out");
+                    _step = 3;
+                    _time = 0;
                     break;
             }
         }

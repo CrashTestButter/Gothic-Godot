@@ -47,6 +47,7 @@ namespace GothicGodot.Player
         public Interaction.GrabHand RightGrab { get; private set; }
         public bool IsXr => _isXr;
         public XRController3D RightHand => _right;
+        public XRController3D LeftHand => _left;
         public bool IsPlaced => _isPlaced;
 
         /// <summary>Gothic pins the hero in a dialog: no walking, turning or teleporting (the head still looks).</summary>

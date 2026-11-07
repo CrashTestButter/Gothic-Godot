@@ -99,25 +99,29 @@ namespace GothicGodot.Spike
         {
             foreach (var (vob, savedVisual, transform) in _items)
             {
-                var visual = visualOf(vob.Instance) ?? savedVisual;
-                if (string.IsNullOrEmpty(visual) || !IsMeshVisual(visual))
+                var item = CreateItem(vob.Instance, visualOf(vob.Instance) ?? savedVisual, transform, opaque, alpha, far);
+                if (item == null)
                     continue;
-                var parts = GetParts(visual);
-                if (parts == null)
-                    continue;
-                var mesh = GetArrayMesh(visual, parts, opaque, alpha);
-                if (!_shapes.TryGetValue(visual, out var shape))
-                    _shapes[visual] = shape = mesh.CreateConvexShape(true, true);
-                var item = new GothicGodot.Interaction.WorldItem
-                {
-                    Name = vob.Instance,
-                    Instance = vob.Instance,
-                    Transform = transform
-                };
-                item.Setup(mesh, shape, SampleLight(transform.Origin), far);
                 parent.AddChild(item);
                 ItemsBuilt++;
             }
+        }
+
+        /// <summary>One item body (also for items taken out of the inventory); null without a mesh.</summary>
+        public GothicGodot.Interaction.WorldItem CreateItem(string instance, string visual, Transform3D transform,
+            Material opaque, Material alpha, float far)
+        {
+            if (string.IsNullOrEmpty(visual) || !IsMeshVisual(visual))
+                return null;
+            var parts = GetParts(visual);
+            if (parts == null)
+                return null;
+            var mesh = GetArrayMesh(visual, parts, opaque, alpha);
+            if (!_shapes.TryGetValue(visual, out var shape))
+                _shapes[visual] = shape = mesh.CreateConvexShape(true, true);
+            var item = new GothicGodot.Interaction.WorldItem { Name = instance, Instance = instance, Transform = transform };
+            item.Setup(mesh, shape, SampleLight(transform.Origin), far);
+            return item;
         }
 
         private Color SampleLight(Vector3 position) => _light.Sample(position, new Color(0.6f, 0.6f, 0.6f));

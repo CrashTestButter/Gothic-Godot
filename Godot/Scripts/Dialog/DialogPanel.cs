@@ -95,22 +95,8 @@ namespace GothicGodot.Dialog
             _dialog.Ended += OnEnded;
         }
 
-        private static Label3D CreateLabel(int fontSize, Color color)
-        {
-            return new Label3D
-            {
-                FontSize = fontSize,
-                PixelSize = 0.001f,
-                Modulate = color,
-                OutlineSize = 10,
-                OutlineModulate = new Color(0, 0, 0, 0.85f),
-                NoDepthTest = true,
-                RenderPriority = 10,
-                OutlineRenderPriority = 9,
-                AutowrapMode = TextServer.AutowrapMode.WordSmart,
-                Width = _panelWidth * 1000f
-            };
-        }
+        private static Label3D CreateLabel(int fontSize, Color color) =>
+            Interaction.PanelLabels.Create(fontSize, color, _panelWidth);
 
         public override void _Process(double delta)
         {

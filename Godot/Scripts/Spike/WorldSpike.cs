@@ -254,26 +254,37 @@ namespace GothicGodot.Spike
                        ZenKit.DaedalusExecutionFlags.IgnoreConstSpecifier));
             if (_ai == null)
                 vm.RegisterExternalDefault((_, _) => { });
-            var visuals = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            var items = new Dictionary<string, ZenKit.Daedalus.ItemInstance>(StringComparer.OrdinalIgnoreCase);
 
-            string VisualOf(string instance)
+            ZenKit.Daedalus.ItemInstance ItemOf(string instance)
             {
-                if (visuals.TryGetValue(instance, out var cached))
+                if (items.TryGetValue(instance, out var cached))
                     return cached;
-                string visual = null;
+                ZenKit.Daedalus.ItemInstance item = null;
                 // Only real instances: InitInstance on another symbol ends the process natively.
                 var symbol = vm.GetSymbolByName(instance);
                 if (symbol is { Type: ZenKit.DaedalusDataType.Instance })
-                    visual = vm.InitInstance<ZenKit.Daedalus.ItemInstance>(symbol)?.Visual;
-                visuals[instance] = visual;
-                return visual;
+                    item = vm.InitInstance<ZenKit.Daedalus.ItemInstance>(symbol);
+                items[instance] = item;
+                return item;
             }
+
+            var far = _args.GetFloat("item-far", 25f);
+            ItemInfo = ItemOf;
+            CreateItem = (instance, transform) =>
+                _vobs.CreateItem(instance, ItemOf(instance)?.Visual, transform, materials[3], materials[4], far);
 
             var root = new Node3D { Name = "Items" };
             AddChild(root);
-            _vobs.BuildItems(root, materials[3], materials[4], VisualOf, _args.GetFloat("item-far", 25f));
+            _vobs.BuildItems(root, materials[3], materials[4], instance => ItemOf(instance)?.Visual, far);
             Log($"items built in {watch.ElapsedMilliseconds} ms: {_vobs.ItemsBuilt} of {_vobs.ItemCount} grabbable");
         }
+
+        /// <summary>The script instance of an item by name (C_ITEM), cached.</summary>
+        public Func<string, ZenKit.Daedalus.ItemInstance> ItemInfo { get; private set; }
+
+        /// <summary>A new item body by instance name, e.g. taken out of the inventory (not yet in the tree).</summary>
+        public Func<string, Transform3D, GothicGodot.Interaction.WorldItem> CreateItem { get; private set; }
 
         private void BuildParticles(Vfs vfs, ZenKit.World world, Stopwatch watch)
         {
@@ -578,11 +589,23 @@ namespace GothicGodot.Spike
                     hand.Setup(_humans, _handMesh, isLeft, new Color(0.9f, 0.9f, 0.9f));
                 }
             }
-            if (_args.Get("grab-test", "false") == "true")
+            GothicGodot.Interaction.InventoryPanel bag = null;
+            var itemRoot = GetNodeOrNull<Node3D>("Items");
+            if (itemRoot != null && CreateItem != null)
+            {
+                bag = new GothicGodot.Interaction.InventoryPanel { Name = "Bag" };
+                AddChild(bag);
+                bag.Init(player, _ai?.Hero?.Inventory ?? new GothicGodot.Interaction.Inventory(), ItemInfo, CreateItem,
+                    itemRoot);
+                bag.IsAllowed = () => _ai?.Dialog?.IsActive != true;
+            }
+
+            var grabTest = _args.Get("grab-test", "");
+            if (grabTest == "true" || grabTest == "bag")
             {
                 var test = new GothicGodot.Interaction.GrabTest { Name = "GrabTest" };
                 AddChild(test);
-                test.Init(player, GetNodeOrNull<Node3D>("Items"), _args.Screenshot);
+                test.Init(player, itemRoot, _args.Screenshot, grabTest == "bag" ? bag : null);
             }
 
             if (_ai?.Dialog != null)

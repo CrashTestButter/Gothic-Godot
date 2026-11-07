@@ -57,6 +57,7 @@ namespace GothicGodot.Spike
         public int ArmorInstance = -1;
         public string SpawnWaypoint;
         public readonly List<RoutineEntry> Routine = new();
+        public readonly Interaction.Inventory Inventory = new();
 
         public Node3D Root;
         public Skeleton3D Skeleton;
