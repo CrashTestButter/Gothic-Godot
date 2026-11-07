@@ -65,6 +65,9 @@ namespace GothicGodot.Spike
         public IReadOnlyList<GothicNpc> Npcs => _npcs;
         public DaedalusVm Vm => _vm;
         public ModelFactory HumanFactory => _factory;
+
+        /// <summary>Tests: every state call of this NPC is logged ([Trace]).</summary>
+        public GothicNpc TracedNpc { get; set; }
         public GothicFight Fight { get; private set; }
         public double Time => _time;
 
@@ -121,6 +124,11 @@ namespace GothicGodot.Spike
             GD.Print($"[Ai] hero after init: HP {hero.GetAttribute(NpcAttribute.HitPoints)} / " +
                      $"{hero.GetAttribute(NpcAttribute.HitPointsMax)}, level {hero.Level}");
 
+            // Like the engine on a new game: the global init (G1: B_InitGuildAttitudes), then the world's startup.
+            InitGuildAttitudes();
+            var init = _vm.GetSymbolByName("INIT_GLOBAL");
+            if (init is { Type: DaedalusDataType.Function, IsExternal: false })
+                Measure(() => _vm.Call(init.Index));
             var startup = _vm.GetSymbolByName(startupFunction);
             if (startup != null)
                 Measure(() => _vm.Call(startup.Index));
@@ -359,6 +367,7 @@ namespace GothicGodot.Spike
                 if (!npc.IsInDialog)
                     Tick(npc, delta);
             Dialog?.Update(delta);
+            Fight?.Update();
 
             var aiMs = _frameWatch.Elapsed.TotalMilliseconds;
             _frameWatch.Restart();
@@ -432,6 +441,19 @@ namespace GothicGodot.Spike
             // The dead lie still; their ZS_Dead ran when they died.
             if (npc.IsDead)
                 return;
+
+            if (npc.PendingState != 0)
+            {
+                var next = npc.PendingState;
+                npc.PendingState = 0;
+                if (npc.IsPendingEndRun && npc.StateEnd != 0 && npc.State is GothicNpc.LoopState.Loop)
+                    CallState(npc, npc.StateEnd);
+                // The _END may ask for yet another state; the newest request wins. Like Gothic-Unity's StartState,
+                // the new state enables its own perceptions (ZS_Attack: no assessing the player mid fight).
+                SetState(npc, npc.PendingState != 0 ? npc.PendingState : next);
+                npc.PendingState = 0;
+                npc.Perceptions.Clear();
+            }
             // Active perceptions on the perception timer: the hero is the one the camp reacts to.
             if (_time >= npc.NextPerceptionTime)
             {
@@ -477,10 +499,10 @@ namespace GothicGodot.Spike
 
                     if (_time < npc.NextLoopTime)
                         return;
-                    npc.NextLoopTime = _time + npc.PerceptionTime;
+                    npc.NextLoopTime = _time + LoopInterval(npc);
                     _loops++;
                     FrameEvents.StateLoops++;
-                    if (CallState(npc, npc.StateLoop) != _loopContinue)
+                    if (CallState(npc, npc.StateLoop) != _loopContinue && npc.PendingState == 0)
                         npc.State = GothicNpc.LoopState.End;
                     break;
                 case GothicNpc.LoopState.End:
@@ -569,6 +591,8 @@ namespace GothicGodot.Spike
 
         private void SetState(GothicNpc npc, int state)
         {
+            if (npc == TracedNpc)
+                GD.Print($"[Trace] {_time:F2} {npc.Name}: state {_vm.GetSymbolByIndex(state)?.Name}");
             if (!_stateFunctions.TryGetValue(state, out var functions))
             {
                 var symbol = _vm.GetSymbolByIndex(state);
@@ -617,6 +641,8 @@ namespace GothicGodot.Spike
                 _vmWatch.Stop();
             }
 
+            if (npc == TracedNpc)
+                GD.Print($"[Trace] {_time:F2} {npc.Name}: {symbol.Name} -> {result} (other {Npc(_vm.GlobalOther as NpcInstance)?.Name ?? "-"})");
             var callMs = _vmWatch.Elapsed.TotalMilliseconds - before;
             var allocated = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
             _allocatedByState[symbol.Name] = _allocatedByState.GetValueOrDefault(symbol.Name) + allocated;
@@ -681,6 +707,9 @@ namespace GothicGodot.Spike
                     npc.Path.AddRange(FindPathTo(npc.Position, point.Position));
                     PlayClip(npc, npc.WalkClip, true);
                     break;
+                case AttackAction attack:
+                    StartAttack(npc, attack);
+                    break;
                 case GothicNpc.TurnAction turn:
                     var facing = turn.Target != null
                         ? turn.Target.Position - npc.Position
@@ -733,6 +762,10 @@ namespace GothicGodot.Spike
             {
                 case GothicNpc.WaitAction wait:
                     if (npc.ActionTime >= wait.Seconds)
+                        npc.Current = null;
+                    break;
+                case AttackAction attack:
+                    if (TickAttack(npc, attack, delta))
                         npc.Current = null;
                     break;
                 case GothicNpc.SpeakAction speak:
@@ -960,6 +993,8 @@ namespace GothicGodot.Spike
         /// <summary>The engine starts a state at once (ZS_Unconscious, ZS_Dead): the queue is dropped, main runs next.</summary>
         public void StartStateNow(GothicNpc npc, int state, NpcInstance other)
         {
+            npc.PendingState = 0;
+            npc.Perceptions.Clear();
             npc.Actions.Clear();
             npc.Current = null;
             SetState(npc, state);
@@ -1115,7 +1150,10 @@ namespace GothicGodot.Spike
                         return;
                     if (!string.IsNullOrEmpty(waypoint))
                         target.Instance.Wp = waypoint;
-                    SetState(target, function);
+                    // The switch happens after the running script call (often the old state's loop, which then
+                    // returns LOOP_END): the new state wins over that end, and behaviour 1 runs the old _END first.
+                    target.PendingState = function;
+                    target.IsPendingEndRun = behaviour != 0;
                 }));
             _vm.RegisterExternal("Npc_GetDistToWP", (DaedalusVm.ExternalFunc<int, NpcInstance, string>)((npc, waypoint) =>
             {
@@ -1327,6 +1365,8 @@ namespace GothicGodot.Spike
                 _externals++;
                 return npc != null ? 1 : 0;
             }));
+
+            RegisterFightExternals();
         }
     }
 }

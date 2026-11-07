@@ -109,7 +109,7 @@ namespace GothicGodot.Dialog
             if (!string.IsNullOrEmpty(_testNpc))
                 RunTest(delta);
 
-            _player.IsInputLocked = _dialog.IsActive;
+            _player.SetInputLock("dialog", _dialog.IsActive);
             if (!_dialog.IsActive)
             {
                 _panel.Visible = false;

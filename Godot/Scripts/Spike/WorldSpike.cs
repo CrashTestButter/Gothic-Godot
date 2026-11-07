@@ -789,9 +789,12 @@ namespace GothicGodot.Spike
                 var swing = new GothicGodot.Interaction.MeleeSwing { Name = "MeleeSwing" };
                 AddChild(swing);
                 swing.Init(player, _ai, () => _ai.Dialog?.IsActive != true);
-                if (_args.Get("fight-test", "false") == "true" && bag != null)
+                if (_args.Get("fight-test", "false") != "false" && bag != null)
                 {
-                    var fightTest = new GothicGodot.Interaction.FightTest { Name = "FightTest" };
+                    var fightTest = new GothicGodot.Interaction.FightTest
+                    {
+                        Name = "FightTest", IsOneHit = _args.Get("fight-test", "") == "react"
+                    };
                     AddChild(fightTest);
                     fightTest.Init(player, _ai, swing, bag, _args.Screenshot);
                 }

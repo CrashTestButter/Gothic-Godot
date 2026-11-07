@@ -85,7 +85,7 @@ namespace GothicGodot.Interaction
 
             _mob = mob;
             _progress = 0;
-            _player.IsInputLocked = true;
+            _player.SetInputLock("lock picking", true);
             UpdateLabel();
             GD.Print($"[Lock] picking {mob.Name} ({mob.PickString.Length} turns)");
             return Result.Picking;
@@ -104,7 +104,7 @@ namespace GothicGodot.Interaction
                 return;
             _mob = null;
             _label.Visible = false;
-            _player.IsInputLocked = false;
+            _player.SetInputLock("lock picking", false);
         }
 
         public override void _PhysicsProcess(double delta)

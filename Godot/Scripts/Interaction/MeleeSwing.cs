@@ -43,7 +43,18 @@ namespace GothicGodot.Interaction
 
         public override void _PhysicsProcess(double delta)
         {
-            if (_player == null || !_player.IsPlaced || _isAllowed?.Invoke() == false)
+            if (_player == null || !_player.IsPlaced)
+                return;
+            // The scripts see a drawn weapon: guards warn a hero who walks around with one in his hand.
+            if (_ai.Hero != null)
+            {
+                var isArmed = IsWeapon(_player.RightGrab?.Held) || IsWeapon(_player.LeftGrab?.Held);
+                _ai.Hero.FightMode = isArmed ? _ai.GetConstant("FMODE_MELEE", 2) : 0;
+                // Knocked out: no walking, no swinging until he gets up.
+                _player.SetInputLock("knocked out", _ai.Hero.IsDown);
+            }
+
+            if (_isAllowed?.Invoke() == false || _ai.Hero?.IsDown == true)
                 return;
 
             if (_player.IsXr)

@@ -5,11 +5,11 @@
 set -uo pipefail
 cd "$(dirname "$0")/.."
 GAME="${1:-1}"; shift || true
-TESTS=("$@"); [ ${#TESTS[@]} -eq 0 ] && TESTS=(dialog grab bag use chest door lock fight)
+TESTS=("$@"); [ ${#TESTS[@]} -eq 0 ] && TESTS=(dialog grab bag use chest door lock fight react)
 OUT="${OUT:-/tmp/gothic-godot-tests}"; mkdir -p "$OUT"
 COMMON=(--game="$GAME" --player=true --ai=true --hour=12 --anim-far=80 --object-far=80 --music=false)
 declare -A ARG=([dialog]=--dialog-test=nearest [grab]=--grab-test=true [bag]=--grab-test=bag [use]=--grab-test=use
-    [chest]=--chest-test=true [door]=--door-test=true [lock]=--lock-test=true [fight]=--fight-test=true)
+    [chest]=--chest-test=true [door]=--door-test=true [lock]=--lock-test=true [fight]=--fight-test=true [react]=--fight-test=react)
 FAILED=0
 for test in "${TESTS[@]}"; do
     log="$OUT/g$GAME-$test.log"

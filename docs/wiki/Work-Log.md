@@ -2,6 +2,19 @@
 
 Newest first.
 
+## 2026-11-07 - Fighting, part 2: NPCs fight back
+
+![Snaf the cook over the beaten hero (1 HP)](images/fight-hit-back.png)
+
+- The NPCs' side, the engine's part of it in spike form: Npc_CanSeeNpc / FreeLOS (senses range, free line of sight, 50° to each side like Gothic-Unity), Npc_SetTarget / Npc_GetTarget, EquipItem (into the inventory too) and drawn weapons (AI_DrawWeapon, AI_ReadyMeleeWeapon, AI_RemoveWeapon; the weapon's mesh in the right hand's slot), Npc_IsInFightMode, Npc_HasEquippedMeleeWeapon, Npc_GetBodyState (down / dead), Npc_ClearAIQueue, and AI_Attack: run straight at the target on the ground, swing, the hit lands half way through the swing if the target is still in reach and in front. Fight states loop every 0.1 s instead of every perception time.
+- Attitudes: the guild table (G1 from B_InitGuildAttitudes - the spike now runs INIT_GLOBAL before the startup like the engine; G2 from its GIL_ATTITUDES array), the NPC's own attitude towards the hero (Npc_SetAttitude / Npc_SetTempAttitude), Npc_GetAttitude / Npc_GetPermAttitude / Wld_Get/SetGuildAttitude with Gothic-Unity's rules.
+- Two state machine fixes, found with a per-NPC trace of every state call:
+  - AI_StartState from inside a state's loop is a switch that happens after the call: ZS_ProclaimAndPunish's loop starts ZS_Attack and returns "end" - the spike ran the old end and went back to the routine, losing the attack. The new state wins now; behaviour 1 runs the old _END first (the daedalus scout's brief on G1's ZS_Attack loop helped rule out the externals).
+  - A state started that way clears the perceptions, like Gothic-Unity's StartState: each state enables its own, and ZS_Attack doesn't assess the player mid fight.
+- The hero's hit points go down; at none he lies down for 10 s (no walking, no swinging) with 1 HP, in ZS_Unconscious for the scripts (C_NpcIsDown), so the winner stops.
+- `--fight-test=react`: one hit on Snaf (G1 Old Camp), then watching: ZS_AssessEnemy -> ZS_ProclaimAndPunish (draws his club) -> ZS_Attack -> two hits of 33 on the 40 HP hero -> the hero goes down -> Snaf looks at the body (ZS_AssessBody), picks up his weapon, heals himself, goes back to cooking, and warns again because the hero still holds a sword. G2 (a citizen in Khorinis, 160 HP): straight into ZS_Attack with her dagger, four near misses of 5 and a full hit of 55 (G2's hit chance rule), the hero goes down, she ransacks his body (ZS_RansackBody). Both suites pass, 9 tests each.
+- Not in it yet: the fight AI's moves from FIGHT.DAT (side steps, combos, parades), blocking, the hero's knockout view, hit sounds, NPCs fighting NPCs (guards helping), Npc_GetNextTarget.
+
 ## 2026-11-07 - Fighting, part 1: the hero hits
 
 ![A guard knocked out next to the castle grate](images/fight-guard-down.png)

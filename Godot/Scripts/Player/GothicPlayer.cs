@@ -50,8 +50,21 @@ namespace GothicGodot.Player
         public XRController3D LeftHand => _left;
         public bool IsPlaced => _isPlaced;
 
-        /// <summary>Gothic pins the hero in a dialog: no walking, turning or teleporting (the head still looks).</summary>
-        public bool IsInputLocked { get; set; }
+        private readonly System.Collections.Generic.HashSet<string> _inputLocks = new();
+
+        /// <summary>
+        /// No walking, turning or teleporting (the head still looks) while anything holds a lock: a dialog (Gothic pins
+        /// the hero), lock picking, being knocked out.
+        /// </summary>
+        public bool IsInputLocked => _inputLocks.Count > 0;
+
+        public void SetInputLock(string reason, bool isLocked)
+        {
+            if (isLocked)
+                _inputLocks.Add(reason);
+            else
+                _inputLocks.Remove(reason);
+        }
 
         /// <summary>Desktop: turns the body and tilts the eyes so the camera looks at the point (tests).</summary>
         public void LookAtPoint(Vector3 target)

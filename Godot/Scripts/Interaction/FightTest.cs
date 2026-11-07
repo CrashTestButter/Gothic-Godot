@@ -23,6 +23,12 @@ namespace GothicGodot.Interaction
         private int _step;
         private GothicNpc _target;
         private int _swings;
+        private string _lastState;
+        private int _heroHits;
+        private bool _wasHeroDown;
+
+        /// <summary>--fight-test=react: one hit, then watch the NPC's answer for 15 s.</summary>
+        public bool IsOneHit;
 
         public void Init(GothicPlayer player, GothicAi ai, MeleeSwing swing, InventoryPanel bag, string screenshot)
         {
@@ -43,8 +49,12 @@ namespace GothicGodot.Interaction
                 case 0 when _time > 2:
                     var weapon = _weapons.FirstOrDefault(w => _ai.Fight.IsMeleeWeapon(w));
                     // A weak one: G2's starting hero mostly near-misses (a tenth of the damage) against guards.
+                    // For the reaction test one who survives a hit (G2's citizens have 5 HP).
+                    var minHitPoints = IsOneHit ? 20 : 0;
+                    var maxHitPoints = IsOneHit ? 200 : 100;
                     _target = _ai.Npcs.Where(n => n.Root != null && n.Factory == _ai.HumanFactory && !n.IsDown &&
-                                                  n.Instance.GetAttribute(ZenKit.Daedalus.NpcAttribute.HitPoints) <= 100)
+                                                  n.Instance.GetAttribute(ZenKit.Daedalus.NpcAttribute.HitPoints) is var hp &&
+                                                  hp >= minHitPoints && hp <= maxHitPoints)
                         .OrderBy(n => n.Position.DistanceTo(_player.GlobalPosition)).FirstOrDefault();
                     if (weapon == null || _target == null)
                     {
@@ -53,6 +63,11 @@ namespace GothicGodot.Interaction
                     }
 
                     _bag.Inventory.Add(weapon);
+                    _ai.HeroHit += (npc, _, _) =>
+                    {
+                        if (npc == _target)
+                            _heroHits++;
+                    };
                     _player.RightGrab.ForcedGrip = true;
                     _bag.TakeOut(_bag.Inventory.Items.ToList().IndexOf(weapon), _player.RightGrab);
                     GD.Print($"[FightTest] {_bag.GetName(weapon)} against {_target.Name} ({_target.SymbolName}), " +
@@ -73,8 +88,26 @@ namespace GothicGodot.Interaction
                     var state = _ai.Vm.GetSymbolByIndex(_target.StateMain)?.Name ?? "-";
                     GD.Print($"[FightTest] swing {_swings}: {(hit == _target ? "hit" : hit != null ? $"hit {hit.Name}" : "missed")}, " +
                              $"{_target.Instance.GetAttribute(ZenKit.Daedalus.NpcAttribute.HitPoints)} hit points, state {state}");
-                    if (_target.IsDown || _swings >= 60)
+                    if (_target.IsDown || _swings >= 60 || IsOneHit && _swings >= 1)
                         Next();
+                    break;
+                case 2 when IsOneHit && _time < 15:
+                    _wasHeroDown |= _ai.Hero?.IsDown == true;
+                    var name = _ai.Vm.GetSymbolByIndex(_target.StateMain)?.Name ?? "-";
+                    if (name != _lastState)
+                    {
+                        _lastState = name;
+                        GD.Print($"[FightTest] {_time:F1} s: {_target.Name} in {name}, target {_target.Target?.Name ?? "-"}, " +
+                                 $"fight mode {_target.FightMode}, {_target.Position.DistanceTo(_player.GlobalPosition):F1} m away");
+                    }
+
+                    break;
+                case 2 when IsOneHit:
+                    Screenshot("hit-back");
+                    var isAnswered = _heroHits > 0 && _wasHeroDown;
+                    Finish(isAnswered
+                        ? $"done: {_target.Name} hit back {_heroHits} times, the hero went down"
+                        : $"{_target.Name} hit the hero {_heroHits} times, hero down {_wasHeroDown}", isAnswered ? 0 : 1);
                     break;
                 case 2 when _time > 2:
                     Screenshot("down");

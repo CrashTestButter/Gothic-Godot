@@ -113,6 +113,10 @@ namespace GothicGodot.Spike
         public double StateTime;
         public float PerceptionTime = 5f;
         public double NextPerceptionTime;
+
+        /// <summary>AI_StartState asked for this state (0: none); with IsPendingEndRun the old state's _END runs first.</summary>
+        public int PendingState;
+        public bool IsPendingEndRun;
         public readonly Dictionary<int, int> Perceptions = new();
 
         public readonly Queue<Action> Actions = new();
@@ -132,6 +136,16 @@ namespace GothicGodot.Spike
         public bool IsDead;
         public double LastHitTime = -10;
         public Area3D Hitbox;
+
+        // Fight: whom it fights, its equipped melee weapon (item instance), 0 none / 1 fists / 2 melee drawn.
+        public GothicNpc Target;
+        public string MeleeWeapon;
+        public int FightMode;
+        public Node3D WeaponNode;
+
+        /// <summary>Its own attitude towards the hero (Npc_SetAttitude / Npc_SetTempAttitude), -1: not set.</summary>
+        public int Attitude = -1;
+        public int TempAttitude = -1;
 
         public Vector3 Position => Root.GlobalPosition;
     }

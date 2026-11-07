@@ -83,6 +83,67 @@ namespace GothicGodot.Spike
             return damage;
         }
 
+        /// <summary>When the knocked out hero gets up again (game time of the AI).</summary>
+        public double HeroDownUntil { get; private set; }
+
+        private const double _heroDownSeconds = 10;
+
+        /// <summary>
+        /// An NPC's swing lands (AI_Attack): the same damage rules with its drawn weapon (or fists). The hero goes
+        /// down unconscious at no hit points and gets up after a while; NPCs like the hero's victims.
+        /// </summary>
+        /// <returns>The damage done, -1 if it didn't count.</returns>
+        public int NpcHits(GothicNpc attacker, GothicNpc target)
+        {
+            if (attacker?.Instance == null || target?.Instance == null || target.IsDown)
+                return -1;
+            var weapon = attacker.FightMode >= _ai.GetConstant("FMODE_MELEE", 2) && attacker.MeleeWeapon != null
+                ? GetItem(attacker.MeleeWeapon)
+                : null;
+            var damage = Damage(attacker.Instance, target.Instance, weapon, out var isImmune);
+            if (!isImmune)
+                damage = Math.Max(damage, _ai.GetConstant("NPC_MINIMAL_DAMAGE", 0));
+            if ((target.Instance.Flags & 2) != 0)
+                damage = 0;
+            var hitPoints = target.Instance.GetAttribute(NpcAttribute.HitPoints) - damage;
+            target.Instance.SetAttribute(NpcAttribute.HitPoints, Math.Max(hitPoints, 0));
+            GD.Print($"[Fight] {attacker.Name} hits {target.Name} with {weapon?.Name ?? "fists"}: {damage} damage, " +
+                     $"{Math.Max(hitPoints, 0)} left");
+            if (hitPoints > 0)
+                return damage;
+
+            if (target == _ai.Hero)
+            {
+                target.Instance.SetAttribute(NpcAttribute.HitPoints, 1);
+                target.IsDown = true;
+                HeroDownUntil = _ai.Time + _heroDownSeconds;
+                // The scripts ask Npc_IsInState(hero, ZS_Unconscious) (C_NpcIsDown): the winner stops attacking.
+                target.StateMain = _vm.GetSymbolByName("ZS_UNCONSCIOUS")?.Index ?? 0;
+                GD.Print($"[Fight] the hero goes down, {attacker.Name} won");
+            }
+            else if (target.Factory == _ai.HumanFactory && _vm.GetSymbolByName("ZS_UNCONSCIOUS") != null)
+            {
+                KnockOut(target);
+            }
+            else
+            {
+                Kill(target);
+            }
+
+            return damage;
+        }
+
+        /// <summary>The knocked out hero gets up when his time is over.</summary>
+        public void Update()
+        {
+            var hero = _ai.Hero;
+            if (hero is not { IsDown: true } || _ai.Time < HeroDownUntil)
+                return;
+            hero.IsDown = false;
+            hero.StateMain = 0;
+            GD.Print("[Fight] the hero gets up");
+        }
+
         private int Damage(NpcInstance attacker, NpcInstance target, ItemInstance weapon, out bool isImmune)
         {
             var mask = weapon?.DamageType ?? attacker.DamageType;
