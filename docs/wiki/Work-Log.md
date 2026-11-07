@@ -2,6 +2,14 @@
 
 Newest first.
 
+## 2026-11-07 - Sound effects
+
+- Gothic's sound effects (775 C_SFX instances in G1's SFX.DAT): a name may have variants (FIRE_SMALL, FIRE_SMALL_A1, ...), one plays at random at the instance's volume.
+- The scripts' sounds: Snd_Play (for the hero's ears) and Snd_Play3d (at an NPC) from small player pools - lock picking's clicks (G_PickLock), item and dialog sounds.
+- The world's 608 sound objects (G1; zCVobSound, zCVobSoundDaytime with its day sound): looping, random (with the pause the ZEN gives) or once; only those whose radius the listener is in get a player, checked twice a second (4 in range at the Old Camp's centre). Their `IsAllowedToRun` flag is false in the saved worlds, so it isn't a filter.
+- Checked headless with `--record-audio`: world sounds on RMS 0.0018 / off silence at the camp's centre (music off); the lock test's turns are heard. `--sounds=false`, `--world-sounds=false` switch them off.
+- Not in it yet: NPC sounds (footsteps, SVM voice lines, fight), the hero's footsteps, reverb by room, sound zones' music volume.
+
 ## 2026-11-07 - Keys and lock picks
 
 - Locked chests and doors with Gothic's rules (like Gothic-Unity's lock picking, from OpenGothic): the key item in the bag opens at once; else the lock combination (e.g. LLRR) is turned with a lock pick - G1 everybody, G2 only with the lock picking talent (else the scripts' PLAYER_MOB_MISSING_LOCKPICK). A wrong turn starts over and may break the pick: G1 by the talent's value (90 untrained), G2 by dexterity. Every turn calls the scripts' G_PickLock(success, brokenOpen).

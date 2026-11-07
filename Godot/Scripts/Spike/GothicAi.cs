@@ -59,6 +59,9 @@ namespace GothicGodot.Spike
         public int Count => _npcs.Count;
         public IReadOnlyList<GothicNpc> Npcs => _npcs;
         public DaedalusVm Vm => _vm;
+
+        /// <summary>The scripts' sounds (Snd_Play, Snd_Play3d) play here once it is set.</summary>
+        public Audio.GothicSfx Sfx { get; set; }
         public GothicDialog Dialog { get; private set; }
         public NpcInstance HeroInstance => _hero?.Instance;
         public GothicNpc Hero => _hero;
@@ -954,6 +957,20 @@ namespace GothicGodot.Spike
                     GD.Print($"[Ai] hero attribute {(NpcAttribute)attribute} {value:+#;-#;0} -> {newValue} in {_currentCall ?? "-"}");
                 npc.SetAttribute((NpcAttribute)attribute, newValue);
             }));
+            _vm.RegisterExternal("Snd_Play", (DaedalusVm.ExternalFuncV<string>)(name =>
+            {
+                _externals++;
+                Sfx?.Play(name);
+            }));
+            if (_vm.GetSymbolByName("Snd_Play3d") != null)
+                _vm.RegisterExternal("Snd_Play3d", (DaedalusVm.ExternalFuncV<NpcInstance, string>)((npc, name) =>
+                {
+                    _externals++;
+                    var target = Npc(npc);
+                    if (target?.Root != null)
+                        Sfx?.Play3d(name, target.Position + Vector3.Up * 1.5f);
+                }));
+
             // Talents (lock picking, weapons): value = G1's chance to break a lock pick etc., skill = the level.
             _vm.RegisterExternal("Npc_SetTalentValue", (DaedalusVm.ExternalFuncV<NpcInstance, int, int>)((npc, talent, value) =>
             {

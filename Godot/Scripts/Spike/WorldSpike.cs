@@ -204,6 +204,22 @@ namespace GothicGodot.Spike
                 Log($"music in {watch.ElapsedMilliseconds} ms");
             }
 
+            if (_args.Get("sounds", "true") == "true")
+            {
+                var start = GetCameraStart(world);
+                var sfx = new GothicGodot.Audio.GothicSfx { Name = "Sfx" };
+                AddChild(sfx);
+                sfx.Init(vfs);
+                if (_ai != null)
+                    _ai.Sfx = sfx;
+                var sounds = new GothicGodot.Audio.WorldSounds { Name = "WorldSounds" };
+                AddChild(sounds);
+                if (_args.Get("world-sounds", "true") == "true")
+                    sounds.Init(sfx, world.RootObjects, () => _camera != null ? _camera.GlobalPosition : start,
+                        _args.GetInt("hour", 12));
+                Log($"sounds in {watch.ElapsedMilliseconds} ms: {sfx.Count} effects, {sounds.Count} sound objects");
+            }
+
             // Loading leaves the cached ZenKit world and the builders' data as garbage (over 1 GB). Collect and
             // compact it now: a big heap makes every later collection slower (frame spikes on the Quest).
             // Deferred: inside _Ready the locals (world, mesh) still keep it alive.
