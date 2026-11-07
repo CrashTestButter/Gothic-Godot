@@ -37,6 +37,9 @@ namespace GothicGodot.Spike
         public Skin Skin { get; }
         public int RootNode { get; }
 
+        // Hierarchy rest pose in Gothic space (row vectors, centimetres) for the weight offsets of soft skins.
+        private readonly System.Numerics.Matrix4x4[] _gothicGlobals;
+
         public HumanFactory(Vfs vfs, TextureArrayBuilder textures, Material opaque, Material alpha)
         {
             _vfs = vfs;
@@ -51,9 +54,15 @@ namespace GothicGodot.Spike
             Rests = new Transform3D[nodes.Count];
             var globals = new Transform3D[nodes.Count];
             Skin = new Skin();
+            _gothicGlobals = new System.Numerics.Matrix4x4[nodes.Count];
 
             for (var i = 0; i < nodes.Count; i++)
             {
+                var gothicLocal = System.Numerics.Matrix4x4.Transpose(nodes[i].Transform);
+                if (nodes[i].ParentIndex < 0)
+                    gothicLocal.Translation = hierarchy.RootTranslation;
+                _gothicGlobals[i] = nodes[i].ParentIndex < 0 ? gothicLocal : gothicLocal * _gothicGlobals[nodes[i].ParentIndex];
+
                 BoneNames[i] = nodes[i].Name;
                 Parents[i] = nodes[i].ParentIndex;
                 var local = MeshPart.ToGodot(nodes[i].Transform);
@@ -178,8 +187,18 @@ namespace GothicGodot.Spike
         private void AddSoftSkin(ISoftSkinMesh soft, ArrayMesh mesh)
         {
             var mrm = soft.Mesh;
-            var positions = mrm.Positions;
             var weights = soft.Weights;
+
+            // Rest positions from the weights' bone offsets, like the engine: armours are modelled in another pose
+            // than the skeleton (HUM_GRDM_ARMOR: 13-19 cm off), only the naked body's positions match it.
+            var positions = new System.Numerics.Vector3[mrm.PositionCount];
+            for (var p = 0; p < positions.Length; p++)
+            {
+                var sum = System.Numerics.Vector3.Zero;
+                foreach (var entry in weights[p])
+                    sum += entry.Weight * System.Numerics.Vector3.Transform(entry.Position, _gothicGlobals[entry.NodeIndex]);
+                positions[p] = sum;
+            }
 
             foreach (var subMesh in mrm.SubMeshes)
             {
