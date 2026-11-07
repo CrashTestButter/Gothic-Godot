@@ -192,10 +192,35 @@ namespace GothicGodot.Spike
 
             var aiMs = _frameWatch.Elapsed.TotalMilliseconds;
             _frameWatch.Restart();
+            var camera = GetViewport().GetCamera3D();
+            _frameIndex++;
+            _animated = 0;
             foreach (var npc in _npcs)
-                Animate(npc, delta);
+            {
+                npc.ClipTime += delta;
+                if (AnimationFar <= 0 || camera == null)
+                {
+                    Animate(npc);
+                    continue;
+                }
+
+                // Like the engine: NPCs beyond the object distance are hidden and not animated, NPCs outside the view
+                // keep their pose, far ones update less often.
+                var distance = npc.Position.DistanceTo(camera.GlobalPosition);
+                var isVisible = distance < AnimationFar;
+                if (npc.Root.Visible != isVisible)
+                    npc.Root.Visible = isVisible;
+                if (!isVisible || !camera.IsPositionInFrustum(npc.Position + Vector3.Up))
+                    continue;
+                var interval = distance < 25f ? 1 : distance < 50f ? 2 : 4;
+                if ((_frameIndex + npc.GetHashCode()) % interval != 0)
+                    continue;
+                Animate(npc);
+                _animated++;
+            }
 
             _boneMs += _frameWatch.Elapsed.TotalMilliseconds;
+            _animatedSum += AnimationFar > 0 ? _animated : _npcs.Count;
             _aiMs += aiMs;
             _vmMs += _vmWatch.Elapsed.TotalMilliseconds - vmBefore;
             _frames++;
@@ -206,7 +231,7 @@ namespace GothicGodot.Spike
             var walking = _npcs.Count(n => n.Current is GothicNpc.GotoAction);
             GD.Print($"[Ai] {_npcs.Count} NPCs ({walking} walking): AI {_aiMs / _frames:F2} ms per frame " +
                      $"(VM {_vmMs / _frames:F2} ms; {_aiMs:F1} / {_vmMs:F1} ms per second), " +
-                     $"animation {_boneMs / _frames:F2} ms; per second " +
+                     $"animation {_boneMs / _frames:F2} ms ({_animatedSum / _frames} animated); per second " +
                      $"{_loops} state loops, {_perceptions} perceptions, {_externals + _defaultExternals} externals " +
                      $"({_defaultExternals} default)");
             if (_missingAnis.Count > 0 && _time < 12)
@@ -214,6 +239,7 @@ namespace GothicGodot.Spike
                     _missingAnis.OrderByDescending(m => m.Value).Take(12).Select(m => $"{m.Key} x{m.Value}")));
             _logTime = 0;
             _aiMs = _vmMs = _boneMs = 0;
+            _animatedSum = 0;
             _frames = 0;
             _loops = _perceptions = _externals = _defaultExternals = 0;
         }
@@ -500,13 +526,22 @@ namespace GothicGodot.Spike
             return true;
         }
 
-        private static void Animate(GothicNpc npc, double delta)
+        /// <summary>"split": position and rotation call per bone, "pose": one SetBonePose call per bone.</summary>
+        public string BoneMode { get; set; } = "split";
+
+        /// <summary>NPCs further than this (metres) are hidden and not animated; 0 animates all.</summary>
+        public float AnimationFar { get; set; }
+
+        private long _frameIndex;
+        private int _animated;
+        private long _animatedSum;
+
+        private void Animate(GothicNpc npc)
         {
             var clip = npc.Clip;
             if (clip == null)
                 return;
 
-            npc.ClipTime += delta;
             var t = npc.ClipTime * clip.Fps;
             var last = clip.FrameCount - 1;
             if (npc.IsClipLooping)
@@ -523,8 +558,17 @@ namespace GothicGodot.Spike
                 var a = frame0 * channels + channel;
                 var b = frame1 * channels + channel;
                 var bone = clip.Nodes[channel];
-                npc.Skeleton.SetBonePosePosition(bone, clip.Positions[a].Lerp(clip.Positions[b], weight));
-                npc.Skeleton.SetBonePoseRotation(bone, clip.Rotations[a].Slerp(clip.Rotations[b], weight));
+                var position = clip.Positions[a].Lerp(clip.Positions[b], weight);
+                var rotation = clip.Rotations[a].Slerp(clip.Rotations[b], weight);
+                if (BoneMode == "pose")
+                {
+                    npc.Skeleton.SetBonePose(bone, new Transform3D(new Basis(rotation), position));
+                }
+                else
+                {
+                    npc.Skeleton.SetBonePosePosition(bone, position);
+                    npc.Skeleton.SetBonePoseRotation(bone, rotation);
+                }
             }
         }
 

@@ -2,6 +2,23 @@
 
 Newest first.
 
+## 2026-11-07 - Where the Quest 3 stands at 120 Hz
+
+Old Camp, 134 scripted NPCs (routines, AI states), objects to 80 m, particles to 40 m:
+
+| Variant | FPS avg (min) | App GPU | GPU busy | CPU (busiest core) | Stale frames | NPC animation |
+|---|---|---|---|---|---|---|
+| MSAA 4x | 110.1 (89) | 6.95 ms | 95% | 30% (50%) | 14.6/s | 1.8-2.1 ms, all 134 |
+| MSAA 4x, animation culled (80 m, outside the view) | 110.0 | 6.53 ms | 91% | 25% (30%) | 12.1/s | 0.74-0.97 ms, 6-19 animated |
+| MSAA 2x, culled | 115.4 (58) | 6.19 ms | 87% | 25% (29%) | 7.0/s | |
+| MSAA 2x, culled, objects 60 m, particles 30 m | 116.9 (82) | 5.61 ms | 80% | 24% (28%) | 7.7/s | |
+| Godot's separate render thread | 46.4 (40) | 7.75 ms | 54% | 54% (65%) | 78/s | 12-15 GC per second |
+
+- About 110 of 120 FPS with full quality, 115-117 with MSAA 2x. The GPU has room then, yet about 7 frames per second still miss: CPU start to GPU end is ~15.7 ms per frame with ~9.5 ms GPU, so ~6 ms per frame is the main thread (culling, recording ~300 draws, AI, animation) - frames whose CPU part runs long miss the 8.3 ms slot.
+- Godot's separate render thread is no help here (46 FPS, many garbage collections).
+- Animation culling (hide and stop NPCs beyond the object distance, keep the pose outside the view, update far ones less often) cuts the bone work from ~2 ms to under 1 ms; the rest is the per-NPC distance and view check.
+- Next: measure the main thread's render setup per frame (Godot's render time measurement), fewer draw calls (merge per cell more aggressively, NPCs as one mesh each), occlusion culling.
+
 ## 2026-11-07 - Daily routines and AI states on the Quest
 
 The question: animations and daily routines cost time too. So the spike now runs the Old Camp's real NPCs the way Gothic-Unity's AiHandler does:

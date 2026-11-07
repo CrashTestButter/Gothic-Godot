@@ -98,7 +98,8 @@ namespace GothicGodot.Spike
             {
                 // Real Old Camp NPCs with routines and AI states instead of the idle crowd.
                 var humans = new HumanFactory(vfs, textures, materials[3], materials[4]);
-                var ai = new GothicAi { Name = "GothicAi" };
+                var ai = new GothicAi { Name = "GothicAi", BoneMode = _args.Get("bone-mode", "split"),
+                    AnimationFar = _args.GetFloat("anim-far", 0f) };
                 AddChild(ai);
                 ai.Init(vfs, humans, world, groundLight, _args.GetInt("hour", 12), GetCameraStart(world),
                     _args.GetFloat("ai-radius", 150f));
