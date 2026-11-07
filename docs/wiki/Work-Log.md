@@ -11,13 +11,14 @@ First Gothic 1 world in Godot 4.7.2 (C#, Mobile renderer), desktop, rendered hea
 ![Arena](images/old-camp-arena.png)
 ![Huts at the castle](images/old-camp-castle-huts.png)
 ![From the south](images/old-camp-overview-south.png)
+![The valley from the mountains](images/old-camp-valley.png)
 
 What is in it:
 - World mesh from ZenKit, only the polygons the BSP leaves reference (like Gothic and Gothic-Unity), cut into 64 m cells per kind (opaque, alpha tested, water): 636 meshes, 107k triangles.
-- 7214 static objects (.3DS / MRM), 271 shared meshes, one node each.
+- 7214 static objects (.3DS / MRM), 271 shared meshes, merged into the world cells (or one node each with `--vob-mode=nodes`).
 - One texture array (409 layers of 256 px, every texture scaled to the layer size) shared by everything.
 - Gothic's baked vertex light on the world; objects take the light of the world below them (like Gothic's ground polygon light), plus a little sun shading.
-- Procedural sky and fog instead of Gothic's sky layers.
+- Procedural sky and thin fog instead of Gothic's sky layers, 1.5 km camera range.
 
 Not in it: NPCs and animated models, mobs (.ASC), decals, particles, Gothic's sky, light maps of rooms, day time.
 
@@ -26,7 +27,7 @@ Findings:
 - ZenKit works unchanged in Godot C# (.NET 8 desktop): VFS, world, meshes, textures. Native library resolution through `NativeLibrary.SetDllImportResolver`.
 - Loading on the desktop: world 1.1 s, world mesh 1 s, objects 0.3 s, texture array 0.1 s.
 - Managed memory 910 MB after loading, mostly the cached ZenKit world mesh and the builder lists. Too much for a Quest; the port needs Gothic-Unity's static cache approach (or streaming).
-- Draw calls in Old Camp views: 3600-4300 with one node per object. Far above the Quest budget (400-600), as expected from [[Godot-Risks]] R2. Next: merge static objects per cell and material, MultiMesh for repeated ones.
+- Draw calls in Old Camp views: 3600-4300 with one node per object, far above the Quest budget (400-600), as expected from [[Godot-Risks]] R2. Merging the objects into the world cells (their light baked into the vertex colour, one texture array) brings it to 218-580 with a 1.5 km view. Cost: 370k-710k triangles per view, as whole cells are drawn; Gothic's object fade distance (and lower detail far away) has to come back for the Quest. Merged load adds 0.8 s and 180 MB managed memory (1093 MB total).
 - Godot's per-instance shader parameters share one global buffer: 7214 instances overflowed the default, raised `rendering/limits/global_shader_variables/buffer_size` to 262144.
 - Coordinates: Gothic is left-handed, Godot right-handed. Mirroring z keeps the world readable; triangle corners are then reversed (world fans 0, p+1, p; mesh triangles w0, w2, w1) and rotations become `S * R * S` with `S = diag(1, 1, -1)`. Every position, rotation and animation in the port goes through this one conversion.
 

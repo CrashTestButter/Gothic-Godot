@@ -9,10 +9,11 @@ namespace GothicGodot.Spike
 {
     /// <summary>
     /// Builds the world mesh as one mesh per grid cell and kind (opaque, alpha tested, water), all sharing one texture
-    /// array material - the same idea as Gothic-Unity's world chunks, without its BSP and light based slicing.
+    /// array material - the same idea as Gothic-Unity's world chunks, without its light based slicing. Static objects
+    /// can be merged into the same cells (their light baked into the vertex colour), so a cell is one draw call per
+    /// kind.
     ///
-    /// Gothic is left-handed, Godot right-handed: z is mirrored, which also turns Gothic's counter-clockwise front
-    /// faces into Godot's clockwise ones, so the fan keeps Gothic's corner order.
+    /// Gothic is left-handed, Godot right-handed: z is mirrored, and triangle corners are reversed to stay front faces.
     /// </summary>
     public class WorldChunkBuilder
     {
@@ -25,7 +26,6 @@ namespace GothicGodot.Spike
 
         private class Chunk
         {
-            public Kind Kind;
             public readonly List<Vector3> Positions = new();
             public readonly List<Vector3> Normals = new();
             public readonly List<Color> Colors = new();
@@ -41,10 +41,16 @@ namespace GothicGodot.Spike
             public Kind Kind;
         }
 
-        public static bool IsWindingFlipped;
+        private readonly float _cellSize;
+        private readonly Dictionary<(int X, int Z, Kind Kind), Chunk> _chunks = new();
 
         public int ChunkCount { get; private set; }
         public int TriangleCount { get; private set; }
+
+        public WorldChunkBuilder(float cellSize)
+        {
+            _cellSize = cellSize;
+        }
 
         public static Vector3 ToGodot(System.Numerics.Vector3 gothic) => new(gothic.X / 100f, gothic.Y / 100f, -gothic.Z / 100f);
 
@@ -70,8 +76,8 @@ namespace GothicGodot.Spike
             return result;
         }
 
-        public void Build(IMesh mesh, IReadOnlyList<int> polygonIds, TextureArrayBuilder textures, float cellSize,
-            Node3D parent, Func<Kind, Material> getMaterial, GroundLightSampler groundLight = null)
+        public void AddWorld(IMesh mesh, IReadOnlyList<int> polygonIds, TextureArrayBuilder textures,
+            GroundLightSampler groundLight = null)
         {
             var materials = new MaterialInfo[mesh.MaterialCount];
             for (var i = 0; i < materials.Length; i++)
@@ -85,7 +91,6 @@ namespace GothicGodot.Spike
                 };
             }
 
-            var chunks = new Dictionary<(int X, int Z, Kind Kind), Chunk>();
             var polygons = mesh.Polygons;
             var positions = mesh.Positions;
             var features = mesh.Features;
@@ -100,13 +105,8 @@ namespace GothicGodot.Spike
                 var info = materials[polygon.MaterialIndex];
                 if (info.Layer == 0)
                     continue;
-                var first = ToGodot(positions[polygon.PositionIndices[0]]);
-                var key = ((int)Math.Floor(first.X / cellSize), (int)Math.Floor(first.Z / cellSize), info.Kind);
-                if (!chunks.TryGetValue(key, out var chunk))
-                {
-                    chunk = new Chunk { Kind = info.Kind };
-                    chunks[key] = chunk;
-                }
+
+                var chunk = GetChunk(ToGodot(positions[polygon.PositionIndices[0]]), info.Kind);
 
                 int AddCorner(int corner)
                 {
@@ -132,12 +132,33 @@ namespace GothicGodot.Spike
                 for (var p = 1; p < polygon.PositionIndices.Count - 1; p++)
                 {
                     chunk.Indices.Add(AddCorner(0));
-                    chunk.Indices.Add(AddCorner(IsWindingFlipped ? p + 1 : p));
-                    chunk.Indices.Add(AddCorner(IsWindingFlipped ? p : p + 1));
+                    chunk.Indices.Add(AddCorner(p + 1));
+                    chunk.Indices.Add(AddCorner(p));
                 }
             }
+        }
 
-            foreach (var ((x, z, kind), chunk) in chunks)
+        /// <summary>
+        /// Adds one static object's triangles in world space to the cell of its origin.
+        /// </summary>
+        public void AddObject(Vector3 origin, Kind kind, Vector3[] positions, Vector3[] normals, Vector2[] uvs,
+            int layer, Color[] colors, int[] indices)
+        {
+            var chunk = GetChunk(origin, kind);
+            var start = chunk.Positions.Count;
+            chunk.Positions.AddRange(positions);
+            chunk.Normals.AddRange(normals);
+            chunk.Uvs.AddRange(uvs);
+            chunk.Colors.AddRange(colors);
+            for (var i = 0; i < positions.Length; i++)
+                chunk.Layers.Add(new Vector2(layer, 0));
+            foreach (var index in indices)
+                chunk.Indices.Add(start + index);
+        }
+
+        public void CreateNodes(Node3D parent, Func<Kind, Material> getMaterial)
+        {
+            foreach (var ((x, z, kind), chunk) in _chunks)
             {
                 var arrays = new Godot.Collections.Array();
                 arrays.Resize((int)Mesh.ArrayType.Max);
@@ -162,6 +183,20 @@ namespace GothicGodot.Spike
                 ChunkCount++;
                 TriangleCount += chunk.Indices.Count / 3;
             }
+
+            _chunks.Clear();
+        }
+
+        private Chunk GetChunk(Vector3 position, Kind kind)
+        {
+            var key = ((int)Math.Floor(position.X / _cellSize), (int)Math.Floor(position.Z / _cellSize), kind);
+            if (!_chunks.TryGetValue(key, out var chunk))
+            {
+                chunk = new Chunk();
+                _chunks[key] = chunk;
+            }
+
+            return chunk;
         }
     }
 }

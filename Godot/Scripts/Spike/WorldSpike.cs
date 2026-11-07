@@ -46,26 +46,37 @@ namespace GothicGodot.Spike
 
             var textures = new TextureArrayBuilder(vfs, _args.SliceSize);
             var materials = CreateMaterials();
-            WorldChunkBuilder.IsWindingFlipped = _args.Get("flip", "true") == "true";
             var worldRoot = new Node3D { Name = "World" };
             AddChild(worldRoot);
 
             var groundLight = new GroundLightSampler();
-            var builder = new WorldChunkBuilder();
-            var polygonIds = WorldChunkBuilder.GetLeafPolygons(world.BspTree.Cache());
-            builder.Build(mesh, polygonIds, textures, _args.CellSize, worldRoot, kind => materials[(int)kind], groundLight);
-            Log($"world mesh built in {watch.ElapsedMilliseconds} ms: {builder.ChunkCount} chunks, " +
-                $"{builder.TriangleCount} triangles, {textures.LayerCount} texture layers, {textures.MissingCount} missing");
+            var builder = new WorldChunkBuilder(_args.CellSize);
+            builder.AddWorld(mesh, WorldChunkBuilder.GetLeafPolygons(world.BspTree.Cache()), textures, groundLight);
+            Log($"world polygons collected in {watch.ElapsedMilliseconds} ms");
 
-            if (_args.IsVobsEnabled)
+            // --vob-mode=nodes (one node per object), merged (objects in the world cells) or none.
+            var vobMode = _args.IsVobsEnabled ? _args.Get("vob-mode", "merged") : "none";
+            if (vobMode != "none")
             {
-                var vobRoot = new Node3D { Name = "Vobs" };
-                AddChild(vobRoot);
-                var vobs = new VobBuilder(vfs, textures, groundLight, materials[3], materials[4]);
-                vobs.Build(world.RootObjects, vobRoot);
-                Log($"objects built in {watch.ElapsedMilliseconds} ms: {vobs.InstanceCount} instances of " +
-                    $"{vobs.MeshCount} meshes, {vobs.MissingCount} missing, {textures.LayerCount} texture layers");
+                var vobs = new VobBuilder(vfs, textures, groundLight);
+                if (vobMode == "nodes")
+                {
+                    var vobRoot = new Node3D { Name = "Vobs" };
+                    AddChild(vobRoot);
+                    vobs.BuildNodes(world.RootObjects, vobRoot, materials[3], materials[4]);
+                }
+                else
+                {
+                    vobs.BuildMerged(world.RootObjects, builder);
+                }
+
+                Log($"objects ({vobMode}) built in {watch.ElapsedMilliseconds} ms: {vobs.InstanceCount} instances of " +
+                    $"{vobs.MeshCount} meshes, {vobs.MissingCount} missing");
             }
+
+            builder.CreateNodes(worldRoot, kind => materials[(int)kind]);
+            Log($"world nodes created in {watch.ElapsedMilliseconds} ms: {builder.ChunkCount} chunks, " +
+                $"{builder.TriangleCount} triangles, {textures.LayerCount} texture layers, {textures.MissingCount} missing");
 
             var array = textures.Build();
             foreach (var material in materials)
@@ -157,7 +168,7 @@ namespace GothicGodot.Spike
                 Sky = new Sky { SkyMaterial = sky },
                 FogEnabled = true,
                 FogLightColor = new Color(0.62f, 0.66f, 0.7f),
-                FogDensity = _args.GetFloat("fog", 0.0018f),
+                FogDensity = _args.GetFloat("fog", 0.0005f),
                 FogSkyAffect = 0.3f,
                 TonemapMode = Godot.Environment.ToneMapper.Linear
             };
@@ -220,7 +231,7 @@ namespace GothicGodot.Spike
             else
             {
                 _rig = new Node3D();
-                _camera = new Camera3D { Position = new Vector3(0, 1.7f, 0), Far = 600, Fov = _args.GetFloat("fov", 75f) };
+                _camera = new Camera3D { Position = new Vector3(0, 1.7f, 0), Far = _args.GetFloat("far", 1500f), Fov = _args.GetFloat("fov", 75f) };
                 _rig.AddChild(_camera);
             }
 
