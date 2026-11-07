@@ -28,7 +28,7 @@ namespace GothicGodot.Spike
         {
             public Node3D Root;
             public Skeleton3D Skeleton;
-            public HumanFactory.Clip Clip;
+            public ModelFactory.Clip Clip;
             public float Phase;
         }
 
@@ -50,7 +50,7 @@ namespace GothicGodot.Spike
             return npc?.Root.GlobalTransform;
         }
 
-        public void Spawn(HumanFactory factory, ZenKit.World world, int count, GroundLightSampler light, string boneMode,
+        public void Spawn(ModelFactory factory, ZenKit.World world, int count, GroundLightSampler light, string boneMode,
             bool isGothic2 = false)
         {
             var guardArmors = isGothic2 ? _g2GuardArmors : _guardArmors;

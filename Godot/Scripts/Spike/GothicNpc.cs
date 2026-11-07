@@ -59,11 +59,14 @@ namespace GothicGodot.Spike
         public readonly List<RoutineEntry> Routine = new();
         public readonly Interaction.Inventory Inventory = new();
 
+        public ModelFactory Factory;
+        public string IdleClip = "S_RUN";
+        public string WalkClip = "S_WALKL";
         public Node3D Root;
         public Skeleton3D Skeleton;
 
         // Animation
-        public HumanFactory.Clip Clip;
+        public ModelFactory.Clip Clip;
         public double ClipTime;
         public bool IsClipLooping = true;
 

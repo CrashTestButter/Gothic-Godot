@@ -8,11 +8,12 @@ using Mesh = Godot.Mesh;
 namespace GothicGodot.Spike
 {
     /// <summary>
-    /// Gothic humans for the spike: the HUMANS.MDH skeleton, skinned bodies or armours (.MDM soft skin, rest pose
-    /// with the root at RootTranslation like Gothic-Unity's bind poses), heads (.MMB) and animations (.MAN) baked to
-    /// per-frame bone poses. Bone index = hierarchy node index, the Skin binds every node.
+    /// One of Gothic's animated models (HUMANS, WOLF, CHESTBIG_OCCHESTLARGE, ...): its skeleton (.MDH, or the .MDL's
+    /// hierarchy), skinned bodies or armours (.MDM soft skin, rest pose with the root at RootTranslation like
+    /// Gothic-Unity's bind poses), heads (.MMB) and animations ({MODEL}-{ANI}.MAN) baked to per-frame bone poses.
+    /// Bone index = hierarchy node index, the Skin binds every node.
     /// </summary>
-    public class HumanFactory
+    public class ModelFactory
     {
         public class Clip
         {
@@ -41,19 +42,30 @@ namespace GothicGodot.Spike
         // Hierarchy rest pose in Gothic space (row vectors, centimetres) for the weight offsets of soft skins.
         private readonly System.Numerics.Matrix4x4[] _gothicGlobals;
 
-        public HumanFactory(Vfs vfs, TextureArrayBuilder textures, Material opaque, Material alpha)
+        public string Model { get; }
+        private readonly Transform3D[] _restGlobals;
+        public TextureArrayBuilder Textures => _textures;
+        public Material Opaque => _opaque;
+        public Material Alpha => _alpha;
+
+        /// <param name="model">The model script's name without extension, e.g. HUMANS or WOLF.</param>
+        public ModelFactory(Vfs vfs, TextureArrayBuilder textures, Material opaque, Material alpha,
+            string model = "HUMANS")
         {
+            Model = model.ToUpperInvariant();
             _vfs = vfs;
             _textures = textures;
             _opaque = opaque;
             _alpha = alpha;
 
-            var hierarchy = new ModelHierarchy(vfs, "HUMANS.MDH").Cache();
+            IModelHierarchy hierarchy = vfs.Find($"{Model}.MDH") != null
+                ? new ModelHierarchy(vfs, $"{Model}.MDH").Cache()
+                : new Model(vfs, $"{Model}.MDL").Cache().Hierarchy;
             var nodes = hierarchy.Nodes;
             BoneNames = new string[nodes.Count];
             Parents = new int[nodes.Count];
             Rests = new Transform3D[nodes.Count];
-            var globals = new Transform3D[nodes.Count];
+            var globals = _restGlobals = new Transform3D[nodes.Count];
             Skin = new Skin();
             _gothicGlobals = new System.Numerics.Matrix4x4[nodes.Count];
 
@@ -123,11 +135,17 @@ namespace GothicGodot.Spike
             ArrayMesh result = null;
             if (_vfs.Find(mdmName) != null)
             {
-                var model = new ModelMesh(_vfs, mdmName).Cache();
+                // A model's .MDL holds its mesh too (meatbugs have no .MDM).
+                var model = mdmName.EndsWith(".MDL", StringComparison.OrdinalIgnoreCase)
+                    ? new ZenKit.Model(_vfs, mdmName).Cache().Mesh
+                    : new ModelMesh(_vfs, mdmName).Cache();
                 result = new ArrayMesh();
                 var names = GetVariantNames(variant, skin);
                 foreach (var soft in model.Meshes)
                     AddSoftSkin(soft, result, names);
+                // Rigid parts hanging on one bone each (meatbugs, mobs' lids).
+                foreach (var (node, mrm) in model.Attachments)
+                    AddAttachment(node, mrm, result, names);
                 if (result.GetSurfaceCount() == 0)
                     result = null;
             }
@@ -170,7 +188,7 @@ namespace GothicGodot.Spike
                 return cached;
 
             Clip clip = null;
-            var file = $"HUMANS-{name}.MAN";
+            var file = $"{Model}-{name}.MAN";
             if (_vfs.Find(file) != null)
             {
                 var animation = new ModelAnimation(_vfs, file).Cache();
@@ -206,6 +224,36 @@ namespace GothicGodot.Spike
 
             _clips[name] = clip;
             return clip;
+        }
+
+        private void AddAttachment(string nodeName, IMultiResolutionMesh mrm, ArrayMesh mesh,
+            Func<string, string> textureName)
+        {
+            var node = Array.FindIndex(BoneNames, n => string.Equals(n, nodeName, StringComparison.OrdinalIgnoreCase));
+            if (node < 0)
+                return;
+            var parts = new List<MeshPart>();
+            MeshPart.AddFromMrm(mrm, _textures, _restGlobals[node], parts, textureName);
+            foreach (var part in parts)
+            {
+                var count = part.Positions.Length;
+                var layers = new Vector2[count];
+                Array.Fill(layers, new Vector2(part.Layer, 0));
+                var bones = new int[count * 4];
+                var weights = new float[count * 4];
+                for (var i = 0; i < count; i++)
+                {
+                    bones[i * 4] = node;
+                    weights[i * 4] = 1f;
+                }
+
+                var arrays = NewArrays(part.Positions, part.Normals, part.Uvs, layers, part.Indices);
+                arrays[(int)Mesh.ArrayType.Bones] = bones;
+                arrays[(int)Mesh.ArrayType.Weights] = weights;
+                mesh.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, arrays);
+                mesh.SurfaceSetMaterial(mesh.GetSurfaceCount() - 1,
+                    part.Kind == WorldChunkBuilder.Kind.AlphaTest ? _alpha : _opaque);
+            }
         }
 
         private void AddSoftSkin(ISoftSkinMesh soft, ArrayMesh mesh, Func<string, string> textureName)

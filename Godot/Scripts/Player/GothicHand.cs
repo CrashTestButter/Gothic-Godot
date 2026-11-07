@@ -25,7 +25,7 @@ namespace GothicGodot.Player
         /// <summary>0 open .. 1 closed, from the grip.</summary>
         public Func<float> Grip;
 
-        public void Setup(HumanFactory factory, ArrayMesh body, bool isLeft, Color tint)
+        public void Setup(ModelFactory factory, ArrayMesh body, bool isLeft, Color tint)
         {
             var side = isLeft ? "L" : "R";
             _hand = Array.IndexOf(factory.BoneNames, $"BIP01 {side} HAND");

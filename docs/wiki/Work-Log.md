@@ -2,6 +2,16 @@
 
 Newest first.
 
+## 2026-11-07 - Monsters: every model with its own skeleton
+
+![A sheep in Khorinis](images/monster-sheep.png)
+![A young wolf outside the city](images/monster-wolf.png)
+
+- The human-only model code is now a model factory per model script (HUMANS, WOLF, SHEEP, MEATBUG, ...): skeleton from the model's .MDH (or its .MDL), bodies from .MDM soft skins plus rigid parts hanging on one bone (meatbugs, later chest lids and doors), animations from {MODEL}-{ANI}.MAN.
+- Monsters spawn from the startup scripts like the humans: Khorinis 59 monsters of 11 models within 150 m (all of them; before: all left out), Old Camp 3. Idle and walk clips by model (humans S_RUN / S_WALKL, monsters S_FISTRUN / S_FISTWALKL); monsters without a routine start their start state (ZS_MM_AllScheduler).
+- `--shots=%MODEL,distance` frames the first NPC of a model.
+- Cost: Khorinis with 239 scripted NPCs, AI 0.05 ms per frame on the desktop, animation 0.42 ms (20 animated within the view).
+
 ## 2026-11-07 - Eating and drinking
 
 - Food and potions (ITEM_KAT_FOOD, ITEM_KAT_POTIONS from the scripts) held at the mouth for 0.3 s (XR) or U while holding them (desktop) are used up: the item's on_state[0] function runs with self = the hero and item = the item, like Gothic-Unity's AI_UseItem. Npc_ChangeAttribute keeps HP and mana between 0 and their max (Gothic-Unity's rule).

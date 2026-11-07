@@ -160,7 +160,7 @@ namespace GothicGodot.Spike
                 if (_lineTime < _lineDuration)
                     return;
                 if (_line.Speaker != null)
-                    _ai.PlayClip(_line.Speaker, "S_RUN", true);
+                    _ai.PlayClip(_line.Speaker, _line.Speaker.IdleClip, true);
                 _line = null;
             }
 
@@ -188,7 +188,7 @@ namespace GothicGodot.Spike
             if (Npc != null)
             {
                 Npc.IsInDialog = false;
-                _ai.PlayClip(Npc, "S_RUN", true);
+                _ai.PlayClip(Npc, Npc.IdleClip, true);
             }
 
             IsActive = false;
@@ -325,7 +325,7 @@ namespace GothicGodot.Spike
             toHero.Y = 0;
             if (toHero.LengthSquared() > 0.01f)
                 npc.Root.Rotation = new Vector3(0, Mathf.Atan2(-toHero.X, -toHero.Z), 0);
-            _ai.PlayClip(npc, "S_RUN", true);
+            _ai.PlayClip(npc, npc.IdleClip, true);
         }
 
         /// <summary>OU.BIN (or OU.CSL) from _work/DATA/scripts/content/CUTSCENE in any case, else from the VFS.</summary>

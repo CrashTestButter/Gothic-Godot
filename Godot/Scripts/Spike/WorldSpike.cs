@@ -29,7 +29,7 @@ namespace GothicGodot.Spike
         private GothicAi _ai;
         private AudioEffectRecord _recorder;
         private VobBuilder _vobs;
-        private HumanFactory _humans;
+        private ModelFactory _humans;
         private ArrayMesh _handMesh;
 
         public override void _Ready()
@@ -120,7 +120,7 @@ namespace GothicGodot.Spike
             if (_args.Get("ai", "false") == "true")
             {
                 // Real Old Camp NPCs with routines and AI states instead of the idle crowd.
-                var humans = _humans = new HumanFactory(vfs, textures, materials[3], materials[4]);
+                var humans = _humans = new ModelFactory(vfs, textures, materials[3], materials[4]);
                 var ai = new GothicAi { Name = "GothicAi", BoneMode = _args.Get("bone-mode", "split"),
                     AnimationFar = _args.GetFloat("anim-far", 0f) };
                 AddChild(ai);
@@ -132,7 +132,7 @@ namespace GothicGodot.Spike
             }
             else if (npcCount > 0)
             {
-                var humans = _humans = new HumanFactory(vfs, textures, materials[3], materials[4]);
+                var humans = _humans = new ModelFactory(vfs, textures, materials[3], materials[4]);
                 var crowd = new HumanCrowd { Name = "Humans" };
                 AddChild(crowd);
                 _crowd = crowd;
@@ -162,7 +162,7 @@ namespace GothicGodot.Spike
             // a layer).
             if (_args.Get("player", "false") == "true")
             {
-                _humans ??= new HumanFactory(vfs, textures, materials[3], materials[4]);
+                _humans ??= new ModelFactory(vfs, textures, materials[3], materials[4]);
                 var hero = _ai?.Hero;
                 _handMesh = _humans.GetSkinnedMesh($"{(hero?.Body ?? "HUM_BODY_NAKED0").ToUpperInvariant()}.MDM",
                     hero?.BodyTexture ?? 0, hero?.SkinColor ?? 0) ?? _humans.GetSkinnedMesh("HUM_BODY_NAKED0.MDM");
@@ -356,6 +356,17 @@ namespace GothicGodot.Spike
                 var forward = -npc.Basis.Z.Normalized();
                 target = npc.Origin + Vector3.Up * 1.5f;
                 position = npc.Origin + forward * distance + Vector3.Up * 1.65f + npc.Basis.X.Normalized() * (distance * 0.35f);
+            }
+            else if (shot.StartsWith('%') && _ai?.Npcs.FirstOrDefault(n =>
+                         n.Factory?.Model == shot[1..].Split(',')[0].ToUpperInvariant() && n.Root != null) is { } scripted)
+            {
+                // "%MODEL[,distance]": a free view of the first scripted NPC of that model (WOLF, SHEEP, ...).
+                var parts = shot[1..].Split(',');
+                target = scripted.Position + Vector3.Up * 0.6f;
+                position = FindViewpoint(target, parts.Length > 1
+                    ? float.Parse(parts[1], System.Globalization.CultureInfo.InvariantCulture)
+                    : 3f) ?? target + new Vector3(2, 1, 2);
+                Log($"shot of {scripted.Name} ({scripted.Factory.Model}) at {scripted.Position}");
             }
             else if (shot.StartsWith('@'))
             {

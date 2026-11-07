@@ -123,7 +123,7 @@ namespace GothicGodot.Player
         }
 
         /// <summary>The hero's own hands instead of the boxes (XR), or his right hand in front of the camera (desktop).</summary>
-        public void SetHands(Spike.HumanFactory factory, ArrayMesh body, Color tint)
+        public void SetHands(Spike.ModelFactory factory, ArrayMesh body, Color tint)
         {
             if (_isXr)
             {

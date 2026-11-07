@@ -23,7 +23,8 @@ namespace GothicGodot.Spike
         private int _percAssessPlayer = 1;
 
         private DaedalusVm _vm;
-        private HumanFactory _factory;
+        private ModelFactory _factory;
+        private Vfs _vfs;
         private ZenKit.World _world;
         private GroundLightSampler _light;
         private readonly List<GothicNpc> _npcs = new();
@@ -72,10 +73,11 @@ namespace GothicGodot.Spike
             _hero.Root = player;
         }
 
-        public void Init(Vfs vfs, HumanFactory factory, ZenKit.World world, GroundLightSampler light, int hour,
+        public void Init(Vfs vfs, ModelFactory factory, ZenKit.World world, GroundLightSampler light, int hour,
             Vector3 heroPosition, float radius, string startupFunction, string dataPath)
         {
             _factory = factory;
+            _vfs = vfs;
             _world = world;
             _light = light;
             _minuteOfDay = hour * 60;
@@ -120,9 +122,43 @@ namespace GothicGodot.Spike
             Dialog = new GothicDialog(_vm, vfs, this, dataPath);
             GD.Print($"[Dialog] {Dialog.InfoCount} infos, subtitles {(Dialog.HasSubtitles ? "OU.BIN" : "missing")}");
 
+            if (_leftOut.Count > 0)
+                GD.Print("[Ai] left out: " + string.Join(", ", _leftOut.Select(l => $"{l.Key} x{l.Value}")));
             _world = null;
             GD.Print($"[Ai] {startupFunction} inserted {_spawns.Count} NPCs, {_npcs.Count} within {radius} m spawned at " +
-                     $"{hour:00}:00 ({_skippedMonsters} monsters left out), routines {_npcs.Sum(n => n.Routine.Count)} entries");
+                     $"{hour:00}:00 ({_monsters} monsters of {_factories.Count(f => f.Value != null)} models, {_skippedMonsters} left out), routines {_npcs.Sum(n => n.Routine.Count)} entries");
+        }
+
+        private readonly Dictionary<string, ModelFactory> _factories = new(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, int> _leftOut = new();
+
+        private void NoteLeftOut(string reason)
+        {
+            _skippedMonsters++;
+            _leftOut[reason] = _leftOut.GetValueOrDefault(reason) + 1;
+        }
+        private int _monsters;
+
+        /// <summary>The model of a visual (HUMANS.MDS, Wolf.mds): HUMANS is the shared one, others load once.</summary>
+        private ModelFactory GetFactory(string visual)
+        {
+            var model = string.IsNullOrEmpty(visual) ? "HUMANS" : Path.GetFileNameWithoutExtension(visual).ToUpperInvariant();
+            if (model == _factory.Model)
+                return _factory;
+            if (_factories.TryGetValue(model, out var cached))
+                return cached;
+            ModelFactory factory = null;
+            try
+            {
+                factory = new ModelFactory(_vfs, _factory.Textures, _factory.Opaque, _factory.Alpha, model);
+            }
+            catch (Exception e)
+            {
+                GD.PushWarning($"[Ai] model {model} can't be loaded: {e.Message}");
+            }
+
+            _factories[model] = factory;
+            return factory;
         }
 
         private void AddEdge(string from, string to)
@@ -152,19 +188,31 @@ namespace GothicGodot.Spike
                 Measure(() => _vm.Call(instance.DailyRoutine));
             }
 
-            // Only humans in this test: monsters (G2 inserts sheep, wolves, ...) have their own skeletons.
-            if (npc.Visual != null && !npc.Visual.StartsWith("HUMANS", StringComparison.OrdinalIgnoreCase))
+            // Humans and monsters (wolves, sheep, ...): each model with its own skeleton and animations.
+            var factory = GetFactory(npc.Visual);
+            if (factory == null)
             {
-                _skippedMonsters++;
+                NoteLeftOut($"model {npc.Visual}");
                 return;
             }
 
-            var armorMdm = GetArmorMdm(npc.ArmorInstance);
+            npc.Factory = factory;
+            npc.IdleClip = factory.GetClip("S_RUN") != null ? "S_RUN" : "S_FISTRUN";
+            npc.WalkClip = factory.GetClip("S_WALKL") != null ? "S_WALKL" : "S_FISTWALKL";
+            var armorMdm = factory == _factory ? GetArmorMdm(npc.ArmorInstance) : null;
             var bodyMdm = armorMdm ?? $"{npc.Body.ToUpperInvariant()}.MDM";
-            var body = _factory.GetSkinnedMesh(bodyMdm, npc.BodyTexture, npc.SkinColor) ??
-                       _factory.GetSkinnedMesh("HUM_BODY_NAKED0.MDM", npc.BodyTexture, npc.SkinColor);
+            var body = factory.GetSkinnedMesh(bodyMdm, npc.BodyTexture, npc.SkinColor) ??
+                       (factory == _factory
+                           ? factory.GetSkinnedMesh("HUM_BODY_NAKED0.MDM", npc.BodyTexture, npc.SkinColor)
+                           : factory.GetSkinnedMesh($"{factory.Model}.MDL", npc.BodyTexture, npc.SkinColor));
             if (body == null)
+            {
+                NoteLeftOut($"body {bodyMdm} of {factory.Model}");
                 return;
+            }
+
+            if (factory != _factory)
+                _monsters++;
 
             npc.Root = new Node3D { Name = $"{symbol.Name}" };
             AddChild(npc.Root);
@@ -173,15 +221,15 @@ namespace GothicGodot.Spike
             npc.Root.GlobalPosition = current.Waypoint != null && _waypoints.TryGetValue(current.Waypoint, out var routinePosition)
                 ? routinePosition
                 : _waypoints[waypoint];
-            npc.Skeleton = _factory.CreateSkeleton();
+            npc.Skeleton = factory.CreateSkeleton();
             npc.Root.AddChild(npc.Skeleton);
             var tint = _light.Sample(npc.Root.GlobalPosition, new Color(0.6f, 0.6f, 0.6f));
-            var bodyInstance = new MeshInstance3D { Mesh = body, Skin = _factory.Skin };
+            var bodyInstance = new MeshInstance3D { Mesh = body, Skin = factory.Skin };
             npc.Skeleton.AddChild(bodyInstance);
             bodyInstance.Skeleton = bodyInstance.GetPathTo(npc.Skeleton);
             bodyInstance.SetInstanceShaderParameter("tint", tint);
 
-            var head = string.IsNullOrEmpty(npc.Head)
+            var head = string.IsNullOrEmpty(npc.Head) || factory != _factory
                 ? null
                 : _factory.GetHeadMesh($"{npc.Head.ToUpperInvariant()}.MMB", npc.HeadTexture, npc.SkinColor);
             if (head != null)
@@ -193,7 +241,7 @@ namespace GothicGodot.Spike
                 headInstance.SetInstanceShaderParameter("tint", tint);
             }
 
-            PlayClip(npc, "S_RUN", true);
+            PlayClip(npc, npc.IdleClip, true);
             npc.NextPerceptionTime = _random.NextDouble() * 2.0;
             _npcs.Add(npc);
             _npcBySymbol[instanceIndex] = npc;
@@ -368,6 +416,13 @@ namespace GothicGodot.Spike
 
             if (entry.State == 0 && npc.Routine.Count > 0)
                 entry = npc.Routine[0];
+            // Monsters have no routine: their start state (ZS_MM_AllScheduler) runs instead.
+            if (entry.State == 0 && npc.Instance.StartAiState > 0)
+            {
+                SetState(npc, npc.Instance.StartAiState);
+                return;
+            }
+
             if (entry.State == 0)
             {
                 npc.State = GothicNpc.LoopState.Start;
@@ -482,7 +537,7 @@ namespace GothicGodot.Spike
                     if (npc.Path.Count == 0)
                         npc.Current = null;
                     else
-                        PlayClip(npc, "S_WALKL", true);
+                        PlayClip(npc, npc.WalkClip, true);
                     break;
             }
         }
@@ -504,7 +559,7 @@ namespace GothicGodot.Spike
                     if (!npc.IsClipLooping && npc.ClipTime * npc.Clip.Fps >= npc.Clip.FrameCount - 1)
                     {
                         npc.Current = null;
-                        PlayClip(npc, npc.Clip.Next ?? "S_RUN", true);
+                        PlayClip(npc, npc.Clip.Next ?? npc.IdleClip, true);
                     }
                     break;
                 case GothicNpc.GotoAction:
@@ -531,7 +586,7 @@ namespace GothicGodot.Spike
                     if (npc.Path.Count == 0)
                     {
                         npc.Current = null;
-                        PlayClip(npc, "S_RUN", true);
+                        PlayClip(npc, npc.IdleClip, true);
                     }
                     break;
                 default:
@@ -660,7 +715,7 @@ namespace GothicGodot.Spike
 
         public bool PlayClip(GothicNpc npc, string name, bool isLooping)
         {
-            var clip = _factory.GetClip(name.ToUpperInvariant());
+            var clip = (npc.Factory ?? _factory).GetClip(name.ToUpperInvariant());
             if (clip == null)
             {
                 _missingAnis[name] = _missingAnis.GetValueOrDefault(name) + 1;
