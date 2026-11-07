@@ -45,6 +45,17 @@ namespace GothicGodot.Spike
                 vfs.Mount(Path.GetFullPath(workPath), "/_work", VfsOverwriteBehavior.Older);
             Log($"mounted {dataPath} in {watch.ElapsedMilliseconds} ms");
 
+            var vmBenchMs = _args.GetFloat("vm-bench", 0f);
+            if (vmBenchMs > 0)
+            {
+                VmBench.Run(vfs, vmBenchMs);
+                if (_args.Get("vm-only", "false") == "true")
+                {
+                    GetTree().Quit();
+                    return;
+                }
+            }
+
             var world = new ZenKit.World(vfs, _args.World, GameVersion.Gothic1);
             var mesh = world.Mesh.Cache();
             Log($"world {_args.World} loaded in {watch.ElapsedMilliseconds} ms: {mesh.PolygonCount} polygons");

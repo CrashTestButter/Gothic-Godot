@@ -2,6 +2,17 @@
 
 Newest first.
 
+## 2026-11-07 - Game logic on the Quest: Daedalus VM
+
+GOTHIC.DAT in ZenKit's Daedalus VM, all 1524 dialog condition functions (DIA_*_CONDITION) called in a loop; externals land in C# (three typed ones as Gothic-Unity registers them, the rest in the default handler), so every external is a native to C# callback plus the P/Invokes ZenKit uses to read its arguments.
+
+| Runtime | GOTHIC.DAT load | Condition calls | Per condition | Per external (with its script) |
+|---|---|---|---|---|
+| Desktop, CoreCLR | 21 ms | 874 per ms | 1.14 µs | 0.84 µs |
+| Quest 3, MonoVM | 42 ms | 165 per ms | 6.04 µs | 4.43 µs |
+
+5.3 times slower on the Quest: part slower CPU, part MonoVM's native/managed transitions. Rough budget: 60 active NPCs running state loops with ~10 externals each at 72 Hz are ~43000 externals per second, about 190 ms per second, a fifth of one core. Workable, but the first place to win back: NativeAOT (linux-bionic), Mono AOT, fewer transitions in ZenKit's C# binding, CoreCLR on Android (.NET 11).
+
 ## 2026-11-07 - Quest 3: the Old Camp runs native
 
 Godot 4.7.2 .NET (MonoVM), Mobile renderer, OpenXR vendors plugin 5.1.0, MSAA 4x, foveation 3, Old Camp with the whole G1 world, 8610 objects, 450 particle emitters, 60 animated humans, camera turning 18° per second (no game logic: no AI, scripts, audio).
