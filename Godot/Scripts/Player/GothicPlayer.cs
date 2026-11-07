@@ -121,6 +121,30 @@ namespace GothicGodot.Player
             Logger.Log($"[Player] {(isXr ? "XR" : "desktop")} player, slope limit {slopeDegrees}°, step {_stepHeight} m", LogCat.VR);
         }
 
+        /// <summary>The hero's own hands instead of the boxes (XR), or his right hand in front of the camera (desktop).</summary>
+        public void SetHands(Spike.HumanFactory factory, ArrayMesh body, Color tint)
+        {
+            if (_isXr)
+            {
+                foreach (var (controller, isLeft) in new[] { (_left, true), (_right, false) })
+                {
+                    controller.GetNodeOrNull("Box")?.QueueFree();
+                    var hand = new GothicHand { Name = isLeft ? "GothicLeftHand" : "GothicRightHand" };
+                    hand.Grip = () => controller.GetFloat("grip");
+                    controller.AddChild(hand);
+                    hand.Setup(factory, body, isLeft, tint);
+                }
+
+                return;
+            }
+
+            var desktopHand = new GothicHand { Name = "GothicRightHand", Position = new Vector3(0.02f, -0.02f, 0.04f) };
+            desktopHand.Grip = () => RightGrab.Held != null || RightGrab.ForcedGrip == true ||
+                                     Input.IsMouseButtonPressed(MouseButton.Right) ? 1f : 0f;
+            RightGrab.AddChild(desktopHand);
+            desktopHand.Setup(factory, body, false, tint);
+        }
+
         private static Interaction.GrabHand CreateGrab(XRController3D hand, string name)
         {
             var grab = new Interaction.GrabHand
@@ -137,6 +161,7 @@ namespace GothicGodot.Player
             _origin.AddChild(hand);
             hand.AddChild(new MeshInstance3D
             {
+                Name = "Box",
                 Mesh = new BoxMesh { Size = new Vector3(0.08f, 0.04f, 0.16f) },
                 MaterialOverride = new StandardMaterial3D { AlbedoColor = new Color(0.78f, 0.58f, 0.48f) }
             });

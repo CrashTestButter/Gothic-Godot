@@ -29,6 +29,8 @@ namespace GothicGodot.Spike
         private GothicAi _ai;
         private AudioEffectRecord _recorder;
         private VobBuilder _vobs;
+        private HumanFactory _humans;
+        private ArrayMesh _handMesh;
 
         public override void _Ready()
         {
@@ -118,7 +120,7 @@ namespace GothicGodot.Spike
             if (_args.Get("ai", "false") == "true")
             {
                 // Real Old Camp NPCs with routines and AI states instead of the idle crowd.
-                var humans = new HumanFactory(vfs, textures, materials[3], materials[4]);
+                var humans = _humans = new HumanFactory(vfs, textures, materials[3], materials[4]);
                 var ai = new GothicAi { Name = "GothicAi", BoneMode = _args.Get("bone-mode", "split"),
                     AnimationFar = _args.GetFloat("anim-far", 0f) };
                 AddChild(ai);
@@ -130,7 +132,7 @@ namespace GothicGodot.Spike
             }
             else if (npcCount > 0)
             {
-                var humans = new HumanFactory(vfs, textures, materials[3], materials[4]);
+                var humans = _humans = new HumanFactory(vfs, textures, materials[3], materials[4]);
                 var crowd = new HumanCrowd { Name = "Humans" };
                 AddChild(crowd);
                 _crowd = crowd;
@@ -156,6 +158,16 @@ namespace GothicGodot.Spike
 
             if (textures.MissingCount > 0)
                 Log("textures missing: " + string.Join(", ", textures.MissingNames.Take(40)));
+            // The hero's hands: his body mesh with his skin (before the texture array is built, a skin variant may add
+            // a layer).
+            if (_args.Get("player", "false") == "true")
+            {
+                _humans ??= new HumanFactory(vfs, textures, materials[3], materials[4]);
+                var hero = _ai?.Hero;
+                _handMesh = _humans.GetSkinnedMesh($"{(hero?.Body ?? "HUM_BODY_NAKED0").ToUpperInvariant()}.MDM",
+                    hero?.BodyTexture ?? 0, hero?.SkinColor ?? 0) ?? _humans.GetSkinnedMesh("HUM_BODY_NAKED0.MDM");
+            }
+
             var array = textures.Build();
             foreach (var material in materials)
             {
@@ -550,6 +562,22 @@ namespace GothicGodot.Spike
             player.Rotation = new Vector3(0, Mathf.DegToRad(_args.GetFloat("yaw", 0f)), 0);
             _ai?.SetHero(player);
             _camera = player.Camera;
+            if (_handMesh != null)
+                player.SetHands(_humans, _handMesh, new Color(0.75f, 0.75f, 0.75f));
+            // --hand-preview: both hands from the side in front of the camera, right one open, left one closed.
+            if (_handMesh != null && _args.Get("hand-preview", "false") == "true")
+            {
+                foreach (var (isLeft, grip, x) in new[] { (false, 0f, -0.1f), (true, 1f, 0.1f) })
+                {
+                    var hand = new GothicGodot.Player.GothicHand
+                    {
+                        Position = new Vector3(x, 0, -0.4f), Rotation = new Vector3(0, Mathf.Pi * 0.5f, 0),
+                        Grip = () => grip
+                    };
+                    player.Camera.AddChild(hand);
+                    hand.Setup(_humans, _handMesh, isLeft, new Color(0.9f, 0.9f, 0.9f));
+                }
+            }
             if (_args.Get("grab-test", "false") == "true")
             {
                 var test = new GothicGodot.Interaction.GrabTest { Name = "GrabTest" };

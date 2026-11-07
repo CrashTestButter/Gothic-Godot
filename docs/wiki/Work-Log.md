@@ -2,6 +2,15 @@
 
 Newest first.
 
+## 2026-11-07 - The hero's hands
+
+![The hero's right hand holding an ore nugget (desktop)](images/hand-holding-nugget.png)
+
+- The boxes are gone: each hand is the hero's own body mesh (his skin from the scripts, later his armour's gloves) on a skeleton of its own where only the hand bone and its finger bone are posed - Gothic's hands are mittens with one finger bone. Every other bone is shrunk to the wrist, so the arm's vertices vanish there and the wrist closes.
+- The hand lies in the controller's grip pose (fingers along -Z, palm towards the other hand, the palm's middle at the grip point) and the finger bone bends up to 75° with the grip. A check at setup makes sure closing moves the finger tip towards the palm.
+- Desktop: the right hand sits low right in front of the eyes and closes while it holds an item.
+- `--hand-preview=true` shows both hands from the side (one open, one closed). Not tried in a headset yet: the grip pose alignment needs a look there.
+
 ## 2026-11-07 - Items: take them, throw them
 
 ![An ore nugget in the desktop hand](images/grab-nugget-held.png)
