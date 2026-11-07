@@ -194,9 +194,20 @@ namespace GothicGodot.Spike
             };
         }
 
-        public ArrayMesh GetSkinnedMesh(string mdmName, int variant = 0, int skin = 0)
+        /// <summary>
+        /// Sub-meshes of one kind become one surface (one draw call per kind instead of one per sub-mesh, the head
+        /// included); false: one surface each, the head on its own (--npc-draws=split, for comparison).
+        /// </summary>
+        public static bool IsMergingSurfaces { get; set; } = true;
+
+        /// <summary>
+        /// A model's skinned mesh; with a head (.MMB) the head goes into the same mesh, skinned to the head bone
+        /// (no attachment node, no draw call of its own).
+        /// </summary>
+        public ArrayMesh GetSkinnedMesh(string mdmName, int variant = 0, int skin = 0, string headMmb = null,
+            int headVariant = 0)
         {
-            var key = $"{mdmName}|{variant}|{skin}";
+            var key = $"{mdmName}|{variant}|{skin}|{headMmb}|{headVariant}";
             if (_meshes.TryGetValue(key, out var cached))
                 return cached;
 
@@ -208,18 +219,86 @@ namespace GothicGodot.Spike
                     ? new ZenKit.Model(_vfs, mdmName).Cache().Mesh
                     : new ModelMesh(_vfs, mdmName).Cache();
                 result = new ArrayMesh();
+                var surfaces = new[] { new SurfaceBuilder(_opaque), new SurfaceBuilder(_alpha) };
                 var names = GetVariantNames(variant, skin);
                 foreach (var soft in model.Meshes)
-                    AddSoftSkin(soft, result, names);
+                    AddSoftSkin(soft, result, surfaces, names);
                 // Rigid parts hanging on one bone each (meatbugs, mobs' lids).
                 foreach (var (node, mrm) in model.Attachments)
-                    AddAttachment(node, mrm, result, names);
+                    AddAttachment(node, mrm, result, surfaces, names);
+                if (headMmb != null && _vfs.Find(headMmb) != null)
+                    AddAttachment(HeadBone, new MorphMesh(_vfs, headMmb).Cache().Mesh, result, surfaces,
+                        GetVariantNames(headVariant, skin));
+                foreach (var surface in surfaces)
+                    surface.AddTo(result);
                 if (result.GetSurfaceCount() == 0)
                     result = null;
             }
 
             _meshes[key] = result;
             return result;
+        }
+
+        public const string HeadBone = "BIP01 HEAD";
+
+        /// <summary>Triangles of one material collected into one surface.</summary>
+        private class SurfaceBuilder
+        {
+            private readonly Material _material;
+            private readonly List<Vector3> _vertices = new();
+            private readonly List<Vector3> _normals = new();
+            private readonly List<Vector2> _uvs = new();
+            private readonly List<Vector2> _layers = new();
+            private readonly List<int> _bones = new();
+            private readonly List<float> _weights = new();
+            private readonly List<int> _indices = new();
+
+            public SurfaceBuilder(Material material)
+            {
+                _material = material;
+            }
+
+            public void Add(Vector3[] vertices, Vector3[] normals, Vector2[] uvs, Vector2[] layers, int[] bones,
+                float[] weights, int[] indices)
+            {
+                var start = _vertices.Count;
+                _vertices.AddRange(vertices);
+                _normals.AddRange(normals);
+                _uvs.AddRange(uvs);
+                _layers.AddRange(layers);
+                _bones.AddRange(bones);
+                _weights.AddRange(weights);
+                foreach (var index in indices)
+                    _indices.Add(start + index);
+            }
+
+            public void AddTo(ArrayMesh mesh)
+            {
+                if (_indices.Count == 0)
+                    return;
+                var arrays = NewArrays(_vertices.ToArray(), _normals.ToArray(), _uvs.ToArray(), _layers.ToArray(),
+                    _indices.ToArray());
+                arrays[(int)Mesh.ArrayType.Bones] = _bones.ToArray();
+                arrays[(int)Mesh.ArrayType.Weights] = _weights.ToArray();
+                mesh.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, arrays);
+                mesh.SurfaceSetMaterial(mesh.GetSurfaceCount() - 1, _material);
+                _vertices.Clear();
+                _normals.Clear();
+                _uvs.Clear();
+                _layers.Clear();
+                _bones.Clear();
+                _weights.Clear();
+                _indices.Clear();
+            }
+        }
+
+        private static void AddPart(ArrayMesh mesh, SurfaceBuilder[] surfaces, bool isAlpha, Vector3[] vertices,
+            Vector3[] normals, Vector2[] uvs, Vector2[] layers, int[] bones, float[] weights, int[] indices)
+        {
+            var surface = surfaces[isAlpha ? 1 : 0];
+            surface.Add(vertices, normals, uvs, layers, bones, weights, indices);
+            if (!IsMergingSurfaces)
+                surface.AddTo(mesh);
         }
 
         public ArrayMesh GetHeadMesh(string mmbName, int variant = 0, int skin = 0)
@@ -295,7 +374,7 @@ namespace GothicGodot.Spike
             return clip;
         }
 
-        private void AddAttachment(string nodeName, IMultiResolutionMesh mrm, ArrayMesh mesh,
+        private void AddAttachment(string nodeName, IMultiResolutionMesh mrm, ArrayMesh mesh, SurfaceBuilder[] surfaces,
             Func<string, string> textureName)
         {
             var node = Array.FindIndex(BoneNames, n => string.Equals(n, nodeName, StringComparison.OrdinalIgnoreCase));
@@ -316,16 +395,13 @@ namespace GothicGodot.Spike
                     weights[i * 4] = 1f;
                 }
 
-                var arrays = NewArrays(part.Positions, part.Normals, part.Uvs, layers, part.Indices);
-                arrays[(int)Mesh.ArrayType.Bones] = bones;
-                arrays[(int)Mesh.ArrayType.Weights] = weights;
-                mesh.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, arrays);
-                mesh.SurfaceSetMaterial(mesh.GetSurfaceCount() - 1,
-                    part.Kind == WorldChunkBuilder.Kind.AlphaTest ? _alpha : _opaque);
+                AddPart(mesh, surfaces, part.Kind == WorldChunkBuilder.Kind.AlphaTest, part.Positions, part.Normals,
+                    part.Uvs, layers, bones, weights, part.Indices);
             }
         }
 
-        private void AddSoftSkin(ISoftSkinMesh soft, ArrayMesh mesh, Func<string, string> textureName)
+        private void AddSoftSkin(ISoftSkinMesh soft, ArrayMesh mesh, SurfaceBuilder[] surfaces,
+            Func<string, string> textureName)
         {
             var mrm = soft.Mesh;
             var weights = soft.Weights;
@@ -389,11 +465,7 @@ namespace GothicGodot.Spike
                     indices[i * 3 + 2] = triangles[i].Wedge1;
                 }
 
-                var arrays = NewArrays(vertices, normals, uvs, layers, indices);
-                arrays[(int)Mesh.ArrayType.Bones] = bones;
-                arrays[(int)Mesh.ArrayType.Weights] = boneWeights;
-                mesh.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, arrays);
-                mesh.SurfaceSetMaterial(mesh.GetSurfaceCount() - 1, hasAlpha ? _alpha : _opaque);
+                AddPart(mesh, surfaces, hasAlpha, vertices, normals, uvs, layers, bones, boneWeights, indices);
             }
         }
 

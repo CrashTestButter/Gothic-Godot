@@ -120,6 +120,7 @@ namespace GothicGodot.Interaction
         {
             var space = _player.GetWorld3D().DirectSpaceState;
             var target = chest.Centre;
+            GothicGodot.Spike.CollisionStreamer.LoadNear(target, 5f);
             for (var i = 0; i < 8; i++)
             {
                 var angle = i * Mathf.Tau / 8;

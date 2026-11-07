@@ -24,7 +24,7 @@ namespace GothicGodot.Spike
         // Options that change what the world build produces.
         private static readonly string[] _keyOptions =
         {
-            "cell", "slice", "vobs", "vob-mode", "items", "mobs", "object-far", "alpha-far", "compress-meshes",
+            "vobs", "vob-mode", "items", "mobs", "object-far", "alpha-far", "compress-meshes",
             "occluder-area", "collision", "skip"
         };
 
@@ -64,7 +64,7 @@ namespace GothicGodot.Spike
 
             foreach (var option in _keyOptions)
                 key.AppendLine($"--{option}={args.Get(option, "")}");
-            key.AppendLine($"textures {args.TextureCompression}");
+            key.AppendLine($"textures {args.TextureCompression} cell {args.CellSize} slice {args.SliceSize}");
             _key = key.ToString();
 
             var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(_key)))[..16].ToLowerInvariant();

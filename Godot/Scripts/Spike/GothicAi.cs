@@ -167,10 +167,12 @@ namespace GothicGodot.Spike
                 GD.Print("[Ai] left out: " + string.Join(", ", _leftOut.Select(l => $"{l.Key} x{l.Value}")));
             _world = null;
             GD.Print($"[Ai] {startupFunction} inserted {_inserted.Count} NPCs, {_npcs.Count} within {radius} m spawned at " +
-                     $"{hour:00}:00 ({_monsters} monsters of {_factories.Count(f => f.Value != null)} models, {_skippedMonsters} left out), routines {_npcs.Sum(n => n.Routine.Count)} entries");
+                     $"{hour:00}:00 ({_monsters} monsters of {_factories.Count(f => f.Value != null)} models, {_skippedMonsters} left out), routines {_npcs.Sum(n => n.Routine.Count)} entries, " +
+                     $"{(float)_surfaces / Math.Max(1, _npcs.Count):F1} surfaces (draw calls) per NPC");
         }
 
         private readonly Dictionary<string, ModelFactory> _factories = new(StringComparer.OrdinalIgnoreCase);
+        private int _surfaces;
         private readonly Dictionary<string, int> _leftOut = new();
 
         private void NoteLeftOut(string reason)
@@ -333,9 +335,15 @@ namespace GothicGodot.Spike
             npc.WalkClip = factory.GetClip("S_WALKL") != null ? "S_WALKL" : "S_FISTWALKL";
             var armorMdm = factory == _factory ? GetArmorMdm(npc.ArmorInstance) : null;
             var bodyMdm = armorMdm ?? $"{npc.Body.ToUpperInvariant()}.MDM";
-            var body = factory.GetSkinnedMesh(bodyMdm, npc.BodyTexture, npc.SkinColor) ??
+            // Humans: the head in the body's mesh, skinned to the head bone - one draw call per NPC.
+            var headMmb = string.IsNullOrEmpty(npc.Head) || factory != _factory
+                ? null
+                : $"{npc.Head.ToUpperInvariant()}.MMB";
+            var mergedHead = ModelFactory.IsMergingSurfaces ? headMmb : null;
+            var body = factory.GetSkinnedMesh(bodyMdm, npc.BodyTexture, npc.SkinColor, mergedHead, npc.HeadTexture) ??
                        (factory == _factory
-                           ? factory.GetSkinnedMesh("HUM_BODY_NAKED0.MDM", npc.BodyTexture, npc.SkinColor)
+                           ? factory.GetSkinnedMesh("HUM_BODY_NAKED0.MDM", npc.BodyTexture, npc.SkinColor, mergedHead,
+                               npc.HeadTexture)
                            : factory.GetSkinnedMesh($"{factory.Model}.MDL", npc.BodyTexture, npc.SkinColor));
             if (body == null)
             {
@@ -361,12 +369,12 @@ namespace GothicGodot.Spike
             bodyInstance.Skeleton = bodyInstance.GetPathTo(npc.Skeleton);
             bodyInstance.SetInstanceShaderParameter("tint", tint);
 
-            var head = string.IsNullOrEmpty(npc.Head) || factory != _factory
+            var head = headMmb == null || mergedHead != null
                 ? null
-                : _factory.GetHeadMesh($"{npc.Head.ToUpperInvariant()}.MMB", npc.HeadTexture, npc.SkinColor);
+                : _factory.GetHeadMesh(headMmb, npc.HeadTexture, npc.SkinColor);
             if (head != null)
             {
-                var attachment = new BoneAttachment3D { BoneName = "BIP01 HEAD" };
+                var attachment = new BoneAttachment3D { BoneName = ModelFactory.HeadBone };
                 npc.Skeleton.AddChild(attachment);
                 var headInstance = new MeshInstance3D { Mesh = head };
                 attachment.AddChild(headInstance);
@@ -390,6 +398,7 @@ namespace GothicGodot.Spike
             PlayClip(npc, npc.IdleClip, true);
             npc.NextPerceptionTime = _random.NextDouble() * 2.0;
             _npcs.Add(npc);
+            _surfaces += body.GetSurfaceCount() + (head?.GetSurfaceCount() ?? 0);
         }
 
         private string GetArmorMdm(int armorInstance)

@@ -2,6 +2,20 @@
 
 Newest first.
 
+## 2026-11-07 - Optimization round 3: fewer draw calls, collision after loading
+
+| Desktop | before | after |
+|---|---|---|
+| G2 start view, draw calls (Quest settings) | 431 | 240 |
+| Draw calls at the test spots (G1 / G2) | 138-402 / 291-454 | 98-291 / 200-284 (23-40% fewer) |
+| Surfaces per NPC (G1 / G2) | 5.1 / 5.4 | 2.0 / 1.7 |
+| G2 load from the cache | 2.9 s | 2.5 s |
+
+- NPCs: the body's sub-meshes (skin, armour parts) and the head go into one surface per material, the head skinned to the head bone instead of hanging on a BoneAttachment3D node - one draw call per NPC (two with alpha tested parts) and one node less to update per frame. Faces up close look the same. `--npc-draws=split` for the old way.
+- World cells 96 m instead of 64 m: G2's start view 397 -> 240 draw calls for 3% more triangles (419k instead of 408k); G1 267 -> 196 with the same triangles. 128 m would cut to 191 / 165 but draws 20% more triangles.
+- Collision after loading: only the pieces within 60 m of the start go in at load, the rest one piece per frame, nearest to the camera first (re-sorted every second); pieces within 30 m of the camera (a teleport) go in at once. The world's collision is cut into pieces of at most 512 triangles: 0.30 ms a piece on the desktop (at most 0.5 ms), all of G2 in after ~27 s at 60 fps (half that at 120 Hz). Adding the scene at load: 586 -> 177 ms. `--collision-near=0` puts all of it in at load. A teleport (and the tests' search for a spot at a far door, chest or item) puts the missing pieces around that point in at once; rays in the same frame already hit them. Found by G2's door test, whose nearest door was beyond 60 m.
+- A 280 ms frame right after loading in every measured run is the test's screenshot being saved, not the game.
+
 ## 2026-11-07 - Optimization round 2: world cache, ETC2 textures, draw calls
 
 The world is built once and saved; later starts load it (Gothic-Unity's pre-caching idea, in Godot's own binary scene format). In the cache: the chunk meshes with their collision and occluders, the ground light the objects and NPCs are lit with, and the texture array's layers (decoded, scaled, compressed) with their names. Built every time: NPCs, items, chests and doors, particles, sounds.

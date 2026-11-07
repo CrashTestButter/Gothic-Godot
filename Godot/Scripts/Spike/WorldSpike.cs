@@ -163,6 +163,8 @@ namespace GothicGodot.Spike
             if (_args.Get("pfx", "true") == "true")
                 BuildParticles(vfs, world, watch);
 
+            // --npc-draws=split: each sub-mesh and the head drawn on their own (the merged way's comparison).
+            ModelFactory.IsMergingSurfaces = _args.Get("npc-draws", "merged") != "split";
             var npcCount = _args.GetInt("npcs", 60);
             if (_args.Get("ai", "false") == "true")
             {
@@ -200,20 +202,20 @@ namespace GothicGodot.Spike
             var isCollisionEnabled = _args.Get("collision", "true") == "true";
             Godot.Material MaterialOf(WorldChunkBuilder.Kind kind) => materials[(int)kind];
             Dictionary<string, int> counts;
+            Node3D chunks;
+            var addStarted = 0L;
             if (cache.IsHit)
             {
                 var waitStarted = watch.ElapsedMilliseconds;
-                var chunks = cache.LoadScene(MaterialOf);
-                var addStarted = watch.ElapsedMilliseconds;
-                worldRoot.AddChild(chunks);
+                chunks = cache.LoadScene(MaterialOf);
+                addStarted = watch.ElapsedMilliseconds;
                 counts = cache.ReadInfo();
-                Log($"world scene: waited {addStarted - waitStarted} ms for the worker thread, " +
-                    $"added in {watch.ElapsedMilliseconds - addStarted} ms");
+                Log($"world scene: waited {addStarted - waitStarted} ms for the worker thread");
             }
             else
             {
-                var chunks = new Node3D { Name = "Chunks" };
-                worldRoot.AddChild(chunks);
+                // Outside the scene while it's built and saved: the collision far away is taken out before it enters.
+                chunks = new Node3D { Name = "Chunks" };
                 builder.CreateNodes(chunks, MaterialOf, isCollisionEnabled);
                 counts = new Dictionary<string, int>
                 {
@@ -226,7 +228,25 @@ namespace GothicGodot.Spike
                     cache.SaveScene(chunks, MaterialOf);
                     Log($"world saved to the cache in {watch.ElapsedMilliseconds - saveStarted} ms");
                 }
+
+                addStarted = watch.ElapsedMilliseconds;
             }
+
+            // --collision-near=<m>: only the collision this near the start goes in now, the rest a piece per frame
+            // (0: all of it now).
+            var collisionNear = _args.GetFloat("collision-near", 60f);
+            if (collisionNear > 0 && chunks.GetNodeOrNull<StaticBody3D>("WorldCollision") is { } collisionBody)
+            {
+                var start = GetCameraStart(world);
+                var streamer = new CollisionStreamer(collisionBody, start, collisionNear,
+                    () => _camera != null ? _camera.GlobalPosition : start) { Name = "CollisionStreamer" };
+                AddChild(streamer);
+                Log($"collision within {collisionNear} m now, {streamer.PendingCount} pieces " +
+                    $"({streamer.PendingTriangles} triangles) after loading");
+            }
+
+            worldRoot.AddChild(chunks);
+            Log($"world scene added in {watch.ElapsedMilliseconds - addStarted} ms");
 
             if (isCollisionEnabled)
                 Log($"collision: {counts.GetValueOrDefault("collision")} triangles");

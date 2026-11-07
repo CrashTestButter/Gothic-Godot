@@ -283,10 +283,7 @@ namespace GothicGodot.Spike
                     var faces = new Vector3[chunk.Indices.Count];
                     for (var i = 0; i < faces.Length; i++)
                         faces[i] = chunk.Positions[chunk.Indices[i]] + center;
-                    var shape = new ConcavePolygonShape3D { BackfaceCollision = true };
-                    shape.SetFaces(faces);
-                    body.AddChild(new CollisionShape3D { Shape = shape });
-                    CollisionTriangleCount += faces.Length / 3;
+                    AddCollision(body, faces);
                 }
 
                 ChunkCount++;
@@ -296,12 +293,7 @@ namespace GothicGodot.Spike
             if (body != null)
             {
                 foreach (var faces in _objectCollision.Values)
-                {
-                    var shape = new ConcavePolygonShape3D { BackfaceCollision = true };
-                    shape.SetFaces(faces.ToArray());
-                    body.AddChild(new CollisionShape3D { Shape = shape });
-                    CollisionTriangleCount += faces.Count / 3;
-                }
+                    AddCollision(body, faces.ToArray());
             }
 
             _chunks.Clear();
@@ -310,6 +302,31 @@ namespace GothicGodot.Spike
         }
 
         private const string _kindMeta = "kind";
+
+        /// <summary>Triangles per collision shape at most: what Jolt builds in one frame when it is added late.</summary>
+        public const int MaxShapeTriangles = 512;
+
+        /// <summary>Collision in pieces, each with its bounds and size for <see cref="CollisionStreamer"/>.</summary>
+        private void AddCollision(StaticBody3D body, Vector3[] faces)
+        {
+            var triangles = faces.Length / 3;
+            for (var first = 0; first < triangles; first += MaxShapeTriangles)
+            {
+                var count = Math.Min(MaxShapeTriangles, triangles - first);
+                var piece = new Vector3[count * 3];
+                Array.Copy(faces, first * 3, piece, 0, piece.Length);
+                var bounds = new Aabb(piece[0], Vector3.Zero);
+                foreach (var corner in piece)
+                    bounds = bounds.Expand(corner);
+                var shape = new ConcavePolygonShape3D { BackfaceCollision = true };
+                shape.SetFaces(piece);
+                var node = new CollisionShape3D { Shape = shape };
+                node.SetMeta(CollisionStreamer.BoundsMeta, bounds);
+                node.SetMeta(CollisionStreamer.TrianglesMeta, count);
+                body.AddChild(node);
+                CollisionTriangleCount += count;
+            }
+        }
 
         /// <summary>Gives every cell mesh below the node the material of its kind (null: none, before saving).</summary>
         public static void SetMaterials(Node parent, Func<Kind, Material> getMaterial)
