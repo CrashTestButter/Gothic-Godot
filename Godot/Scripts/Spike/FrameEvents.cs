@@ -10,6 +10,9 @@ namespace GothicGodot.Spike
         public static double AnimationMs;
         public static bool IsPfxCulled;
 
+        /// <summary>The player's own physics step (movement, ground and wall checks), for the benchmark.</summary>
+        public static double PlayerPhysicsMs;
+
         public static void Clear()
         {
             StateLoops = 0;

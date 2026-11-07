@@ -2,6 +2,41 @@
 
 Newest first.
 
+## 2026-11-08 - Optimization round 4: a benchmark, then everything above 2%
+
+`tools/bench.sh` (`--bench=true`): the player stands at 12 waypoints within 250 m of the start, looking along the four directions at each, with the Quest's settings (particles 40 m, camera 600 m); one line per game with draw calls and triangles (average and most), render and frame setup CPU, AI, animation, physics (the player's share apart), load time, memory. Draw calls and triangles repeat exactly from run to run and stand in for the Quest's GPU and render thread; CPU times vary by 4% (render) to 20% (AI). Each candidate was measured against it; what gave less than 2% or changed the look stayed out.
+
+| Desktop, cached start | before | after |
+|---|---|---|
+| G1 triangles (average / most) | 109k / 201k | 76k / 186k |
+| G2 triangles | 333k / 638k | 222k / 441k |
+| G1 / G2 draw calls (average) | 66 / 66 | 91 / 75 (most 187 / 169) |
+| G1 load | 1.05 s | **0.74 s** |
+| G2 load | 1.84 s | **1.31 s** |
+
+Taken:
+- World cells 64 m again (96 m was measured without occlusion culling): under occlusion culling smaller cells are hidden more often, -27% / -30% triangles for +50% / +23% draw calls (well within the Quest's 400-600). 48 m would take another 23% of G2's triangles for +28% draw calls and +13% render CPU: a question for the Quest.
+- Occlusion culling on by default with occluders from 0.5 m² (they were 2 m² and only on the Quest): without it 262 / 320 draw calls and 40-60% more triangles; it costs 0.2 ms of render CPU on the desktop.
+- Interiors: Gothic's BSP sectors (the rooms of its houses: G2 22, G1 50) get meshes of their own with the furniture standing on their floors, drawn up to 40 m from their bounds (`--interior-far`); their walls are occluders, so from inside a house the world outside is culled. -3% / -2.5% triangles.
+- Fewer particles further away (all within 15 m, 60% to 25 m, 35% beyond; `AmountRatio`, no restart).
+- The world's waynet, freepoints, items, chests and doors, effects, sound objects and music zones are collected in one walk and saved with the world cache: a cached start no longer reads the world file at all (it was read and walked four times). G1 -10%, G2 -8% load.
+- The cached textures and ground light are read on worker threads from before the archives are mounted (G2 -5%, G1 -10% load with the world file still read).
+- At load only what is near: NPC bodies within 40 m, items, effects and chests within 20 m, collision within 40 m; the rest follows nearest first in the first frames. Chests and doors are made when the camera comes near, like items. G1 -10%, G2 -11% load together.
+- The dialogs' subtitles (OU.BIN) are read on a worker thread, the gesture animations looked up at the first line: G1 -4%, G2 -2.5% load.
+
+Measured and left out:
+- Trees ending at 40 m (`--alpha-far=40`): G1 -26%, G2 -8% triangles, but forests vanish beyond 40 m. Objects ending at 60 m instead of 80: -10% triangles, visible. Both look decisions.
+- Levels of detail: Godot's `ImporterMesh.GenerateLods` gives no levels at runtime (the mesh simplifier is an editor module), so the Quest couldn't make them; it would take a simplifier of our own.
+- Physics: 0.5-0.7 ms a frame on the desktop, of which the player's own step is 0.05 ms; it stays the same without NPCs, with all collision in one body or in 1500 pieces - the engine's tick. A VR finding on the way: the player moves in physics ticks, 60 a second, on a 120 Hz Quest; smooth walking may judder ([[Headset-Test]]).
+- Occluder sizes 1 and 4 m², 96 m cells with occlusion, collision 60 m at load: worse or below 2%.
+- The 280 ms frame after loading in the benchmark runs is the screenshot being saved.
+
+Below 2% or not worth the risk, so stopped there:
+- The load's other parts (mounting the archives, the effects' scripts and textures, the items' meshes, the sound scripts) could only move to worker threads with ZenKit reading files on two threads at once, or into the first frames as hitches.
+- AI per frame (0.1-0.2 ms) is mostly the scripts' state loops and walking NPCs; skipping idle NPCs would save about 0.01 ms.
+- A body costs 4 ms at load mostly for reading its armour and head files the first time (cached after); during play a new armour or head is read when it first comes near - a candidate for reading them in the background, once the Quest shows such frames.
+- What is left on the desktop is engine time (render 0.5 ms, physics 0.5 ms); the next numbers have to come from the Quest.
+
 ## 2026-11-07 - All NPCs live, bodies only near the camera
 
 Until now only the NPCs within 150 m of the start ever showed up; the rest of the world stayed empty. Now it works like the engine's spawn and routine managers, as culling that keeps the world alive:

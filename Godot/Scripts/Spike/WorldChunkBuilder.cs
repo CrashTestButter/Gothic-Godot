@@ -80,8 +80,40 @@ namespace GothicGodot.Spike
             return result;
         }
 
+        /// <summary>
+        /// Interiors - Gothic's BSP sectors, the rooms of its houses - get meshes of their own (with the furniture
+        /// standing on their floors), drawn up to this distance from their bounds; 0: in the world cells like the rest.
+        /// From outside nobody sees much of a room further away, and walls hide them sooner (occlusion culling).
+        /// </summary>
+        public float InteriorFarDistance { get; set; }
+
+        public int InteriorCount { get; private set; }
+
+        private readonly Dictionary<(int Sector, Kind Kind), Chunk> _sectorChunks = new();
+
+        // Floors of the sectors on a 1 m grid: which room an object stands in.
+        private readonly Dictionary<(int X, int Z), List<(int Sector, float Y)>> _sectorFloors = new();
+
+        /// <summary>The sector of each polygon in one (through the sector's BSP leaves).</summary>
+        public static Dictionary<int, int> GetSectorPolygons(IBspTree bspTree)
+        {
+            var result = new Dictionary<int, int>();
+            var polygonIndices = bspTree.PolygonIndices;
+            for (var s = 0; s < bspTree.SectorCount; s++)
+            {
+                foreach (var nodeIndex in bspTree.GetSector(s).NodeIndices)
+                {
+                    var node = bspTree.GetNode(nodeIndex);
+                    for (var i = node.PolygonIndex; i < node.PolygonIndex + node.PolygonCount; i++)
+                        result.TryAdd(polygonIndices[i], s);
+                }
+            }
+
+            return result;
+        }
+
         public void AddWorld(IMesh mesh, IReadOnlyList<int> polygonIds, TextureArrayBuilder textures,
-            GroundLightSampler groundLight = null)
+            GroundLightSampler groundLight = null, IReadOnlyDictionary<int, int> sectorOfPolygon = null)
         {
             var materials = new MaterialInfo[mesh.MaterialCount];
             for (var i = 0; i < materials.Length; i++)
@@ -112,7 +144,15 @@ namespace GothicGodot.Spike
                 if (info.Layer == 0)
                     continue;
 
-                var chunk = GetChunk(ToGodot(positions[polygon.PositionIndices[0]]), info.Kind);
+                var sector = InteriorFarDistance > 0 && polygon.IsSector && sectorOfPolygon != null &&
+                             sectorOfPolygon.TryGetValue(polygonId, out var sectorIndex)
+                    ? sectorIndex
+                    : -1;
+                var chunk = sector >= 0
+                    ? GetSectorChunk(sector, info.Kind)
+                    : GetChunk(ToGodot(positions[polygon.PositionIndices[0]]), info.Kind);
+                if (sector >= 0 && features[polygon.FeatureIndices[0]].Normal.Y > 0.7f)
+                    AddSectorFloor(sector, polygon.PositionIndices, positions);
                 // Colour alpha: outdoors (follows the daylight) or inside a building - a polygon of an indoor portal room
                 // (sector). The outdoor flag itself is set on almost none of G1's polygons.
                 var outdoor = polygon.IsSector ? 0f : 1f;
@@ -151,7 +191,7 @@ namespace GothicGodot.Spike
             }
 
             // The corner dedup tables are only needed while the world polygons are added.
-            foreach (var chunk in _chunks.Values)
+            foreach (var chunk in _chunks.Values.Concat(_sectorChunks.Values))
             {
                 chunk.Dedup.Clear();
                 chunk.Dedup.TrimExcess();
@@ -164,7 +204,10 @@ namespace GothicGodot.Spike
         public void AddObject(Vector3 origin, Kind kind, Vector3[] positions, Vector3[] normals, Vector2[] uvs,
             int layer, Color[] colors, int[] indices)
         {
-            var chunk = GetChunk(origin, kind, ObjectFarDistance > 0 ? _objectChunks : _chunks);
+            var sector = InteriorFarDistance > 0 ? SectorAt(origin) : -1;
+            var chunk = sector >= 0
+                ? GetSectorChunk(sector, kind)
+                : GetChunk(origin, kind, ObjectFarDistance > 0 ? _objectChunks : _chunks);
             var start = chunk.Positions.Count;
             chunk.Positions.AddRange(positions);
             chunk.Normals.AddRange(normals);
@@ -223,20 +266,25 @@ namespace GothicGodot.Spike
                 parent.AddChild(body);
             }
 
-            foreach (var ((x, z, kind), chunk, isObject) in _chunks.Select(c => (c.Key, c.Value, false))
-                         .Concat(_objectChunks.Select(c => (c.Key, c.Value, true))))
+            InteriorCount = _sectorChunks.Keys.Select(k => k.Sector).Distinct().Count();
+            foreach (var ((x, z, kind), chunk, isObject, sector) in _chunks.Select(c => (c.Key, c.Value, false, -1))
+                         .Concat(_objectChunks.Select(c => (c.Key, c.Value, true, -1)))
+                         .Concat(_sectorChunks.Select(c => ((c.Key.Sector, 0, c.Key.Kind), c.Value, false, c.Key.Sector))))
             {
                 if (SkippedKinds.Contains(kind))
                     continue;
 
-                // Object cells are drawn up to the object far distance, measured from the cell's centre.
+                // Object cells and interiors are drawn up to their far distance, measured from their centre.
+                var isInterior = sector >= 0;
                 var center = Vector3.Zero;
-                if (isObject)
+                var radius = 0f;
+                if (isObject || isInterior)
                 {
                     var bounds = new Aabb(chunk.Positions[0], Vector3.Zero);
                     foreach (var position in chunk.Positions)
                         bounds = bounds.Expand(position);
                     center = bounds.GetCenter();
+                    radius = bounds.Size.Length() * 0.5f;
                     for (var i = 0; i < chunk.Positions.Count; i++)
                         chunk.Positions[i] -= center;
                 }
@@ -250,16 +298,16 @@ namespace GothicGodot.Spike
                 arrays[(int)Mesh.ArrayType.TexUV2] = chunk.Layers.ToArray();
                 arrays[(int)Mesh.ArrayType.Index] = chunk.Indices.ToArray();
 
-                var arrayMesh = new ArrayMesh();
                 // --compress-meshes: 16-bit positions (per chunk bounds), octahedral normals, half-float UVs - less video
                 // memory and bandwidth for the Quest's tile based GPU.
-                arrayMesh.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, arrays, null, null,
-                    CompressAttributes ? Mesh.ArrayFormat.FlagCompressAttributes : 0);
+                var flags = CompressAttributes ? Mesh.ArrayFormat.FlagCompressAttributes : 0;
+                var arrayMesh = new ArrayMesh();
+                arrayMesh.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, arrays, null, null, flags);
                 arrayMesh.SurfaceSetMaterial(0, getMaterial(kind));
 
                 var instance = new MeshInstance3D
                 {
-                    Name = $"{(isObject ? "Objects" : kind)}_{x}_{z}",
+                    Name = isInterior ? $"Interior{sector}_{kind}" : $"{(isObject ? "Objects" : kind)}_{x}_{z}",
                     Mesh = arrayMesh,
                     Position = center,
                     CastShadow = GeometryInstance3D.ShadowCastingSetting.Off
@@ -272,10 +320,16 @@ namespace GothicGodot.Spike
                     instance.VisibilityRangeEnd = far + _cellSize * 0.5f;
                     instance.VisibilityRangeEndMargin = 2f;
                 }
+                else if (isInterior)
+                {
+                    instance.VisibilityRangeEnd = InteriorFarDistance + radius;
+                    instance.VisibilityRangeEndMargin = 2f;
+                }
                 parent.AddChild(instance);
 
+                // Inside a house its walls hide the world outside.
                 if (OccluderMinArea > 0 && !isObject && kind == Kind.Opaque)
-                    AddOccluder(parent, chunk, $"{x}_{z}");
+                    AddOccluder(parent, chunk, isInterior ? $"Interior{sector}" : $"{x}_{z}", center);
 
                 // Collision for the world itself; merged objects (millions of triangles in G2) are left out here.
                 if (body != null && kind != Kind.Water && !isObject)
@@ -298,6 +352,8 @@ namespace GothicGodot.Spike
 
             _chunks.Clear();
             _objectChunks.Clear();
+            _sectorChunks.Clear();
+            _sectorFloors.Clear();
             _objectCollision.Clear();
         }
 
@@ -339,7 +395,7 @@ namespace GothicGodot.Spike
             }
         }
 
-        private void AddOccluder(Node3D parent, Chunk chunk, string name)
+        private void AddOccluder(Node3D parent, Chunk chunk, string name, Vector3 center)
         {
             var vertices = new List<Vector3>();
             var indices = new List<int>();
@@ -364,11 +420,61 @@ namespace GothicGodot.Spike
 
             var occluder = new ArrayOccluder3D();
             occluder.SetArrays(vertices.ToArray(), indices.ToArray());
-            parent.AddChild(new OccluderInstance3D { Name = $"Occluder_{name}", Occluder = occluder });
+            parent.AddChild(new OccluderInstance3D { Name = $"Occluder_{name}", Occluder = occluder, Position = center });
             OccluderTriangleCount += indices.Count / 3;
         }
 
         private Chunk GetChunk(Vector3 position, Kind kind) => GetChunk(position, kind, _chunks);
+
+        private Chunk GetSectorChunk(int sector, Kind kind)
+        {
+            if (!_sectorChunks.TryGetValue((sector, kind), out var chunk))
+                _sectorChunks[(sector, kind)] = chunk = new Chunk();
+            return chunk;
+        }
+
+        private void AddSectorFloor(int sector, IReadOnlyList<int> corners, IReadOnlyList<System.Numerics.Vector3> positions)
+        {
+            var min = new Vector2(float.MaxValue, float.MaxValue);
+            var max = new Vector2(float.MinValue, float.MinValue);
+            var y = float.MaxValue;
+            foreach (var corner in corners)
+            {
+                var p = ToGodot(positions[corner]);
+                min = new Vector2(Mathf.Min(min.X, p.X), Mathf.Min(min.Y, p.Z));
+                max = new Vector2(Mathf.Max(max.X, p.X), Mathf.Max(max.Y, p.Z));
+                y = Mathf.Min(y, p.Y);
+            }
+
+            // Big floors are cave or courtyard ground, not a room's.
+            if (max.X - min.X > 40f || max.Y - min.Y > 40f)
+                return;
+            for (var x = (int)Mathf.Floor(min.X); x <= (int)Mathf.Floor(max.X); x++)
+            for (var z = (int)Mathf.Floor(min.Y); z <= (int)Mathf.Floor(max.Y); z++)
+            {
+                if (!_sectorFloors.TryGetValue((x, z), out var list))
+                    _sectorFloors[(x, z)] = list = new List<(int, float)>();
+                list.Add((sector, y));
+            }
+        }
+
+        /// <summary>The room an object stands in: the highest sector floor at most 3.5 m below its origin.</summary>
+        private int SectorAt(Vector3 origin)
+        {
+            if (!_sectorFloors.TryGetValue(((int)Mathf.Floor(origin.X), (int)Mathf.Floor(origin.Z)), out var floors))
+                return -1;
+            var best = -1;
+            var bestY = float.MinValue;
+            foreach (var (sector, y) in floors)
+            {
+                if (y > origin.Y + 0.3f || origin.Y - y > 3.5f || y <= bestY)
+                    continue;
+                best = sector;
+                bestY = y;
+            }
+
+            return best;
+        }
 
         private Chunk GetChunk(Vector3 position, Kind kind, Dictionary<(int X, int Z, Kind Kind), Chunk> chunks)
         {

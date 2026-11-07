@@ -25,11 +25,12 @@ namespace GothicGodot.Spike
         private DaedalusVm _vm;
         private ModelFactory _factory;
         private Vfs _vfs;
-        private ZenKit.World _world;
         private GroundLightSampler _light;
         private readonly List<GothicNpc> _npcs = new();
         private readonly Dictionary<int, GothicNpc> _npcBySymbol = new();
         private readonly List<GothicNpc> _inserted = new();
+
+        public IReadOnlyDictionary<string, Vector3> Waypoints => _waypoints;
 
         /// <summary>Every NPC the scripts inserted, in the world or out of range.</summary>
         public IReadOnlyList<GothicNpc> Inserted => _inserted;
@@ -97,30 +98,28 @@ namespace GothicGodot.Spike
             _hero.SyncPosition();
         }
 
-        public void Init(Vfs vfs, ModelFactory factory, ZenKit.World world, GroundLightSampler light, int hour,
+        public void Init(Vfs vfs, ModelFactory factory, WorldData world, GroundLightSampler light, int hour,
             Vector3 heroPosition, float radius, string startupFunction, string dataPath)
         {
             _factory = factory;
             _vfs = vfs;
-            _world = world;
             _light = light;
             _minuteOfDay = hour * 60;
 
-            foreach (var point in world.WayNet.Points)
+            foreach (var (name, position, _) in world.Waypoints)
             {
-                var position = MeshPart.ToGodot(point.Position);
-                _waypoints[point.Name] = position;
+                _waypoints[name] = position;
                 var cell = WaypointCell(position);
                 if (!_waypointCells.TryGetValue(cell, out var names))
                     _waypointCells[cell] = names = new List<(string, Vector3)>();
-                names.Add((point.Name, position));
+                names.Add((name, position));
             }
-            foreach (var vob in world.RootObjects)
-                CollectFreePoints(vob);
-            foreach (var edge in world.WayNet.Edges)
+            foreach (var (name, position, direction) in world.FreePoints)
+                AddFreePoint(name, position, direction);
+            foreach (var (a, b) in world.Edges)
             {
-                AddEdge(edge.A.Name, edge.B.Name);
-                AddEdge(edge.B.Name, edge.A.Name);
+                AddEdge(a, b);
+                AddEdge(b, a);
             }
 
             _vm = new DaedalusVm(vfs, "GOTHIC.DAT",
@@ -155,16 +154,16 @@ namespace GothicGodot.Spike
             // waypoint; those near the hero get their AI, those near the camera their body (all at once at load).
             _aiRadius = radius;
             UpdatePresence(heroPosition, heroPosition);
-            CreateQueuedBodies(int.MaxValue);
+            // At load only the bodies near the start (the first view); the others follow nearest first, two a frame.
+            CreateQueuedBodies(int.MaxValue, heroPosition, _bodiesAtLoad);
 
             Dialog = new GothicDialog(_vm, vfs, this, dataPath);
             // G2's scripts have ITPO_HEALTH_01 (G1: ItFo_Potion_Health_01): the game decides the damage rules.
             Fight = new GothicFight(this, _vm, _vm.GetSymbolByName("ITPO_HEALTH_01") != null);
-            GD.Print($"[Dialog] {Dialog.InfoCount} infos, subtitles {(Dialog.HasSubtitles ? "OU.BIN" : "missing")}");
+            GD.Print($"[Dialog] {Dialog.InfoCount} infos, subtitles read in the background");
 
             if (_leftOut.Count > 0)
                 GD.Print("[Ai] left out: " + string.Join(", ", _leftOut.Select(l => $"{l.Key} x{l.Value}")));
-            _world = null;
             GD.Print($"[Ai] {startupFunction} inserted {_inserted.Count} NPCs, {_npcs.Count} within {radius} m active, " +
                      $"{_npcs.Count(n => n.HasBody)} with a body (within {BodyNear} m) at " +
                      $"{hour:00}:00 ({_monsters} monsters of {_factories.Count(f => f.Value != null)} models, {_skippedMonsters} left out), routines {_npcs.Sum(n => n.Routine.Count)} entries, " +
@@ -216,25 +215,14 @@ namespace GothicGodot.Spike
         private static (int, int) FreePointCell(Vector3 position) =>
             ((int)Mathf.Floor(position.X / _freePointCell), (int)Mathf.Floor(position.Z / _freePointCell));
 
-        private void CollectFreePoints(ZenKit.Vobs.IVirtualObject vob)
+        private void AddFreePoint(string name, Vector3 position, Vector3 direction)
         {
-            if (vob.Type == ZenKit.Vobs.VirtualObjectType.zCVobSpot && !string.IsNullOrEmpty(vob.Name))
-            {
-                var point = new GothicNpc.FreePoint
-                {
-                    Name = vob.Name,
-                    Position = MeshPart.ToGodot(vob.Position),
-                    // Gothic's forward (+Z) is -Z here, like the models.
-                    Direction = -VobBuilder.ToGodot(vob.Rotation).Z.Normalized()
-                };
-                _freePoints.Add(point);
-                var cell = FreePointCell(point.Position);
-                if (!_freePointCells.TryGetValue(cell, out var list))
-                    _freePointCells[cell] = list = new List<GothicNpc.FreePoint>();
-                list.Add(point);
-            }
-            foreach (var child in vob.Children)
-                CollectFreePoints(child);
+            var point = new GothicNpc.FreePoint { Name = name, Position = position, Direction = direction };
+            _freePoints.Add(point);
+            var cell = FreePointCell(point.Position);
+            if (!_freePointCells.TryGetValue(cell, out var list))
+                _freePointCells[cell] = list = new List<GothicNpc.FreePoint>();
+            list.Add(point);
         }
 
         /// <summary>The nearest free point whose name contains the part (the NPC's own one counts as free).</summary>
@@ -379,11 +367,15 @@ namespace GothicGodot.Spike
             _bodyQueue.Sort((a, b) => b.Position.DistanceSquaredTo(camera).CompareTo(a.Position.DistanceSquaredTo(camera)));
         }
 
-        private void CreateQueuedBodies(int count)
+        private const float _bodiesAtLoad = 40f;
+
+        private void CreateQueuedBodies(int count, Vector3 near = default, float within = float.MaxValue)
         {
             for (var n = 0; n < count && _bodyQueue.Count > 0; n++)
             {
                 var npc = _bodyQueue[^1];
+                if (npc.Position.DistanceTo(near) > within)
+                    break;
                 _bodyQueue.RemoveAt(_bodyQueue.Count - 1);
                 if (npc.IsActive && !npc.HasBody)
                     CreateBody(npc);

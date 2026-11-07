@@ -40,38 +40,29 @@ namespace GothicGodot.Audio
         public int Count => _sources.Count;
         public int Active { get; private set; }
 
-        public void Init(GothicSfx sfx, IEnumerable<IVirtualObject> roots, Func<Vector3> listener, int hour)
+        public void Init(GothicSfx sfx, IEnumerable<Spike.WorldData.Sound> sounds, Func<Vector3> listener, int hour)
         {
             _sfx = sfx;
             _listener = listener;
-            foreach (var root in roots)
-                Collect(root, hour);
-        }
-
-        private void Collect(IVirtualObject vob, int hour)
-        {
-            // IsAllowedToRun is false in the saved worlds; the engine runs them all.
-            if (vob is ISound sound)
+            foreach (var sound in sounds)
             {
-                var name = sound.SoundName;
-                // Daytime sounds swap their sound between StartTime and EndTime (hours).
-                if (sound is ISoundDaytime daytime && IsBetween(hour, daytime.StartTime, daytime.EndTime))
-                    name = daytime.SoundNameDaytime;
+                // IsAllowedToRun is false in the saved worlds; the engine runs them all. Daytime sounds swap their
+                // sound between StartTime and EndTime (hours).
+                var name = sound.IsDaytime && IsBetween(hour, sound.StartTime, sound.EndTime)
+                    ? sound.DaytimeName
+                    : sound.Name;
                 if (!string.IsNullOrEmpty(name))
                     _sources.Add(new Source
                     {
-                        Position = MeshPart.ToGodot(sound.Position),
+                        Position = sound.Position,
                         Radius = Mathf.Max(1f, sound.Radius / 100f),
                         Name = name,
-                        Mode = sound.Mode,
+                        Mode = (SoundMode)sound.Mode,
                         Volume = Mathf.Clamp(sound.Volume / 100f, 0f, 1f),
-                        Delay = sound.RandomDelay,
-                        DelayVar = sound.RandomDelayVar
+                        Delay = sound.Delay,
+                        DelayVar = sound.DelayVar
                     });
             }
-
-            foreach (var child in vob.Children)
-                Collect(child, hour);
         }
 
         private static bool IsBetween(int hour, float start, float end) =>

@@ -49,17 +49,24 @@ namespace GothicGodot.Spike
             _perFrame = perFrame;
         }
 
+        /// <summary>
+        /// At load only what is this near the start is made at once (the first view); the rest within the radius
+        /// follows nearest first in the first frames.
+        /// </summary>
+        public const float AtLoad = 20f;
+
         /// <summary>Made now if near <paramref name="start"/>, else later.</summary>
         public void Add(Vector3 position, Vector3 start, Action create)
         {
-            if (position.DistanceTo(start) <= _radius)
+            var distance = position.DistanceTo(start);
+            if (distance <= AtLoad)
             {
                 create();
                 _made++;
                 return;
             }
 
-            _pending.Add(new Entry { Position = position, Create = create });
+            _pending.Add(new Entry { Position = position, Create = create, Distance = distance });
         }
 
         public override void _EnterTree() => _instances.Add(this);

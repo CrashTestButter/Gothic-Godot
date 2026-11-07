@@ -195,6 +195,14 @@ namespace GothicGodot.Player
 
         public override void _PhysicsProcess(double delta)
         {
+            var started = System.Diagnostics.Stopwatch.GetTimestamp();
+            PhysicsStep(delta);
+            GothicGodot.Spike.FrameEvents.PlayerPhysicsMs +=
+                System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+        }
+
+        private void PhysicsStep(double delta)
+        {
             if (!_isPlaced)
             {
                 PlaceOnGround();

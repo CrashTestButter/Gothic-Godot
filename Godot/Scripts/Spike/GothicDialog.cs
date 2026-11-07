@@ -38,12 +38,33 @@ namespace GothicGodot.Spike
         private readonly DaedalusVm _vm;
         private readonly Vfs _vfs;
         private readonly GothicAi _ai;
-        private readonly CutsceneLibrary _subtitles;
+        // Read on a worker thread while the world loads (38 ms of G2's load); the first line waits for it if needed.
+        private readonly System.Threading.Tasks.Task<CutsceneLibrary> _subtitlesRead;
+        private CutsceneLibrary Subtitles => _subtitlesRead.Result;
         private readonly Dictionary<int, List<InfoInstance>> _infosByNpc = new();
         private readonly HashSet<int> _told = new();
         private readonly List<Option> _choices = new();
         private readonly Queue<Line> _lines = new();
-        private readonly List<string> _gestures = new();
+        private List<string> _gestures;
+
+        // Looked up at the first dialog line (21 ms of the load).
+        private List<string> Gestures
+        {
+            get
+            {
+                if (_gestures != null)
+                    return _gestures;
+                _gestures = new List<string>();
+                for (var i = 1; i < 40; i++)
+                {
+                    var gesture = $"T_DIALOGGESTURE_{i:00}";
+                    if (_ai.HasClip(gesture))
+                        _gestures.Add(gesture);
+                }
+
+                return _gestures;
+            }
+        }
         private readonly Random _random = new(7);
         private Line _line;
         private double _lineTime;
@@ -56,7 +77,7 @@ namespace GothicGodot.Spike
         public bool IsShowingOptions => IsActive && _line == null && _lines.Count == 0 && Options.Count > 0;
         public Line Current => _line;
         public int InfoCount { get; }
-        public bool HasSubtitles => _subtitles != null;
+        public bool HasSubtitles => Subtitles != null;
 
         /// <summary>Lines end after at most this many seconds (0: after the voice); the scripted test speeds up.</summary>
         public float MaxLineSeconds { get; set; }
@@ -84,15 +105,7 @@ namespace GothicGodot.Spike
             foreach (var list in _infosByNpc.Values)
                 list.Sort((a, b) => a.Nr.CompareTo(b.Nr));
 
-            _subtitles = LoadSubtitles(vfs, dataPath);
-
-            for (var i = 1; i < 40; i++)
-            {
-                var gesture = $"T_DIALOGGESTURE_{i:00}";
-                if (ai.HasClip(gesture))
-                    _gestures.Add(gesture);
-            }
-
+            _subtitlesRead = System.Threading.Tasks.Task.Run(() => LoadSubtitles(vfs, dataPath));
             RegisterExternals();
         }
 
@@ -307,8 +320,8 @@ namespace GothicGodot.Spike
 
         private void PlayGesture(GothicNpc npc)
         {
-            if (_gestures.Count > 0)
-                _ai.PlayClip(npc, _gestures[_random.Next(_gestures.Count)], false);
+            if (Gestures.Count > 0)
+                _ai.PlayClip(npc, Gestures[_random.Next(Gestures.Count)], false);
         }
 
         /// <summary>A long line gets the next gesture when the last one is over.</summary>
@@ -370,11 +383,11 @@ namespace GothicGodot.Spike
 
         private string GetText(string name)
         {
-            if (_subtitles == null)
+            if (Subtitles == null)
                 return name;
             try
             {
-                return _subtitles.GetBlock(name)?.Message?.Text ?? name;
+                return Subtitles.GetBlock(name)?.Message?.Text ?? name;
             }
             catch (Exception)
             {
