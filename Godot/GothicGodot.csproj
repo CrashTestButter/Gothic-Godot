@@ -1,0 +1,26 @@
+<Project Sdk="Godot.NET.Sdk/4.7.2">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <!-- Godot's prebuilt Android template only runs net9.0 (non-gradle export). -->
+    <TargetFramework Condition=" '$(GodotTargetPlatform)' == 'android' ">net9.0</TargetFramework>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+    <RootNamespace>GothicGodot</RootNamespace>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <LangVersion>12</LangVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="ZenKit">
+      <HintPath>lib/ZenKit.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+
+  <!-- Native libraries go next to the published assemblies; Godot's export puts every .so of the publish output
+       into the APK's lib/<abi> folder. The editor loads the linux-x64 ones through NativeLibraries.cs. -->
+  <ItemGroup Condition=" $(RuntimeIdentifier.StartsWith('android')) ">
+    <None Include="lib/android-arm64/*.so" CopyToPublishDirectory="PreserveNewest" Link="%(Filename)%(Extension)" />
+  </ItemGroup>
+  <ItemGroup Condition=" $(RuntimeIdentifier.StartsWith('linux')) ">
+    <None Include="lib/linux-x64/*.so" CopyToPublishDirectory="PreserveNewest" Link="%(Filename)%(Extension)" />
+  </ItemGroup>
+</Project>
