@@ -2,6 +2,12 @@
 
 Newest first.
 
+## 2026-11-07 - AI cost with fights and freepoints
+
+- G2 Khorinis, 239 scripted NPCs, desktop: AI 16-25 ms per second (0.27-0.4 ms per frame) of which the VM is only 3-4; G1 Old Camp 10-15. Measured by section: perception checks 1.8, actions 5, script calls 4 ms per second; the rest is spread thin over the NPCs each frame and noisy between runs.
+- Two fixes on the way: Wld_IsFPAvailable (called by many states each loop) searched every freepoint of the world - now the 3x3 cells of an 8 m grid around the NPC; each script call fetched a native symbol wrapper and marshalled its name three times - now cached per function. Neither moved the total much.
+- On the Quest (CPU about 5x slower) that could be ~1 ms per frame at 120 Hz in Khorinis - the next thing to measure on the headset ([[Headset-Test]]). If it holds, the cheap win is ticking only NPCs with something due (next loop or perception time) instead of all of them every frame.
+
 ## 2026-11-07 - Fighting, part 2: NPCs fight back
 
 ![Snaf the cook over the beaten hero (1 HP)](images/fight-hit-back.png)

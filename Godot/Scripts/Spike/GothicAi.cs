@@ -189,17 +189,30 @@ namespace GothicGodot.Spike
 
         private const float _freePointLookup = 7f;
         private readonly List<GothicNpc.FreePoint> _freePoints = new();
+        // The 7 m lookups (Wld_IsFPAvailable, called by many states each loop) search the 3x3 cells around the NPC.
+        private const float _freePointCell = 8f;
+        private readonly Dictionary<(int, int), List<GothicNpc.FreePoint>> _freePointCells = new();
+
+        private static (int, int) FreePointCell(Vector3 position) =>
+            ((int)Mathf.Floor(position.X / _freePointCell), (int)Mathf.Floor(position.Z / _freePointCell));
 
         private void CollectFreePoints(ZenKit.Vobs.IVirtualObject vob)
         {
             if (vob.Type == ZenKit.Vobs.VirtualObjectType.zCVobSpot && !string.IsNullOrEmpty(vob.Name))
-                _freePoints.Add(new GothicNpc.FreePoint
+            {
+                var point = new GothicNpc.FreePoint
                 {
                     Name = vob.Name,
                     Position = MeshPart.ToGodot(vob.Position),
                     // Gothic's forward (+Z) is -Z here, like the models.
                     Direction = -VobBuilder.ToGodot(vob.Rotation).Z.Normalized()
-                });
+                };
+                _freePoints.Add(point);
+                var cell = FreePointCell(point.Position);
+                if (!_freePointCells.TryGetValue(cell, out var list))
+                    _freePointCells[cell] = list = new List<GothicNpc.FreePoint>();
+                list.Add(point);
+            }
             foreach (var child in vob.Children)
                 CollectFreePoints(child);
         }
@@ -209,6 +222,26 @@ namespace GothicGodot.Spike
         {
             GothicNpc.FreePoint best = null;
             var bestDistance = maxDistance;
+            if (maxDistance < _freePointCell)
+            {
+                var (cx, cz) = FreePointCell(npc.Position);
+                for (var x = cx - 1; x <= cx + 1; x++)
+                for (var z = cz - 1; z <= cz + 1; z++)
+                {
+                    if (!_freePointCells.TryGetValue((x, z), out var cell))
+                        continue;
+                    foreach (var point in cell)
+                        if (IsFreeFor(point, npc, part, isOtherThanCurrent) && point.Position.DistanceTo(npc.Position) is var d &&
+                            d < bestDistance)
+                        {
+                            best = point;
+                            bestDistance = d;
+                        }
+                }
+
+                return best;
+            }
+
             foreach (var point in _freePoints)
             {
                 if (point.Name.IndexOf(part, StringComparison.OrdinalIgnoreCase) < 0)
@@ -224,6 +257,10 @@ namespace GothicGodot.Spike
 
             return best;
         }
+
+        private static bool IsFreeFor(GothicNpc.FreePoint point, GothicNpc npc, string part, bool isOtherThanCurrent) =>
+            point.Name.IndexOf(part, StringComparison.OrdinalIgnoreCase) >= 0 &&
+            (point.Occupant == null || point.Occupant == npc) && !(isOtherThanCurrent && point == npc.CurrentFreePoint);
 
         private void AddEdge(string from, string to)
         {
@@ -622,8 +659,15 @@ namespace GothicGodot.Spike
             var externalsBefore = _externals + _defaultExternals;
             var gcBefore = GC.CollectionCount(0);
             var allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
-            var symbol = _vm.GetSymbolByIndex(function);
-            _currentCall = $"{symbol.Name} of {npc.Name}";
+            // Name and return type once per function: a symbol wrapper and its name per call cost more than the call.
+            if (!_functions.TryGetValue(function, out var symbol))
+            {
+                var found = _vm.GetSymbolByIndex(function);
+                _functions[function] = symbol = (found?.Name ?? "?", found?.HasReturn ?? false);
+            }
+
+            _currentCallFunction = symbol.Name;
+            _currentCallNpc = npc;
             _vmWatch.Start();
             try
             {
@@ -945,7 +989,9 @@ namespace GothicGodot.Spike
         private const float _hearingRange = 30f;
         private readonly Dictionary<string, int> _defaultByName = new();
         private bool _isCountingDefaults = OS.GetCmdlineUserArgs().Contains("--count-externals");
-        private string _currentCall;
+        private string _currentCallFunction;
+        private GothicNpc _currentCallNpc;
+        private readonly Dictionary<int, (string Name, bool HasReturn)> _functions = new();
 
         /// <summary>A script constant (e.g. NPC_TALENT_PICKLOCK), or the fallback if the scripts have none.</summary>
         public int GetConstant(string name, int fallback) => _vm.GetSymbolByName(name)?.GetInt(0, null) ?? fallback;
@@ -1222,7 +1268,7 @@ namespace GothicGodot.Spike
                 }
 
                 if (_hero?.Instance != null && npc.Index == _hero.Instance.Index && _heroChangesLogged++ < 10)
-                    GD.Print($"[Ai] hero attribute {(NpcAttribute)attribute} {value:+#;-#;0} -> {newValue} in {_currentCall ?? "-"}");
+                    GD.Print($"[Ai] hero attribute {(NpcAttribute)attribute} {value:+#;-#;0} -> {newValue} in {_currentCallFunction ?? "-"} of {_currentCallNpc?.Name ?? "-"}");
                 npc.SetAttribute((NpcAttribute)attribute, newValue);
             }));
             // Freepoints (Gothic-Unity's rules: looked up within 7 m, held while an NPC walks to or stands on one).
