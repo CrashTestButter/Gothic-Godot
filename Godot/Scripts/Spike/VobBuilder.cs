@@ -105,15 +105,31 @@ namespace GothicGodot.Spike
         /// The collected items as single bodies the hands can take: frozen where Gothic put them (no physics cost)
         /// until they are grabbed, then thrown and falling with physics.
         /// </summary>
-        public void BuildItems(Node3D parent, Material opaque, Material alpha, Func<string, string> visualOf, float far)
+        /// <param name="spawner">Makes the bodies when the camera comes near (null: all now); their meshes and
+        /// textures load now either way, before the texture array is built.</param>
+        public void BuildItems(Node3D parent, Material opaque, Material alpha, Func<string, string> visualOf, float far,
+            NearSpawner spawner = null, Vector3 start = default)
         {
             foreach (var (vob, savedVisual, transform) in _items)
             {
-                var item = CreateItem(vob.Instance, visualOf(vob.Instance) ?? savedVisual, transform, opaque, alpha, far);
-                if (item == null)
+                var visual = visualOf(vob.Instance) ?? savedVisual;
+                void Create()
+                {
+                    var item = CreateItem(vob.Instance, visual, transform, opaque, alpha, far);
+                    if (item == null)
+                        return;
+                    parent.AddChild(item);
+                    ItemsBuilt++;
+                }
+
+                if (spawner == null)
+                {
+                    Create();
                     continue;
-                parent.AddChild(item);
-                ItemsBuilt++;
+                }
+
+                Preload(visual);
+                spawner.Add(transform.Origin, start, Create);
             }
         }
 

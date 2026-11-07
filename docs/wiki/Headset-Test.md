@@ -31,4 +31,5 @@ Everything since the 120 Hz run (2026-11-07) was built and tested without a head
 - Compare with the 2026-11-07 run before the features: 119.1 FPS at 120 Hz, app GPU 4.67 ms.
 - Load time: the first start builds and saves the world cache, the second loads it (`[Spike] world cache` line). Desktop G2: 7.7 s first, 2.8 s after.
 - Textures: the Quest build compresses them to ETC2 (once, then cached); `--texture-compression=none` for the uncompressed look and GPU time to compare.
+- Collision after loading: the `[Collision] all of the world's collision in after ...` line gives the time per piece; on the Quest it should stay well under a millisecond (desktop 0.3 ms), else smaller pieces. Walk off right after loading: no falling through.
 - Trees: `--alpha-far=40` hides alpha tested objects (trees, bushes) at 40 m instead of the object distance; app GPU ms with and without.

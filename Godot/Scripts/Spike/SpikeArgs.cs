@@ -42,7 +42,7 @@ namespace GothicGodot.Spike
 
         public string World => Get("world", IsGothic2 ? "NEWWORLD.ZEN" : "WORLD.ZEN");
         public int SliceSize => GetInt("slice", 256);
-        public float CellSize => GetFloat("cell", 64f);
+        public float CellSize => GetFloat("cell", 96f);
         public float QuitAfterSeconds => GetFloat("quit-after", 0f);
         public string Screenshot => Get("screenshot", "");
         public bool IsVobsEnabled => Get("vobs", "true") == "true";

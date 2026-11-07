@@ -79,6 +79,7 @@ namespace GothicGodot.Player
         /// <summary>Puts the player's feet at the position, facing along the yaw (radians).</summary>
         public void PlaceAt(Vector3 position, float yaw)
         {
+            GothicGodot.Spike.CollisionStreamer.LoadNear(position);
             GlobalPosition = position;
             Rotation = new Vector3(0, yaw, 0);
             Velocity = Vector3.Zero;

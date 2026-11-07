@@ -39,6 +39,9 @@ namespace GothicGodot.Spike
         private ModelFactory _humans;
         private ArrayMesh _handMesh;
 
+        // Where the camera starts (what is made at load is near it).
+        private Vector3 _start;
+
         public override void _Ready()
         {
             _args = new SpikeArgs();
@@ -74,6 +77,7 @@ namespace GothicGodot.Spike
             }
 
             var world = new ZenKit.World(vfs, _args.World, _args.IsGothic2 ? GameVersion.Gothic2 : GameVersion.Gothic1);
+            _start = GetCameraStart(world);
             // Not Cache(): that copies the whole mesh incl. its light maps into managed memory (G2: ~4.5 GB peak).
             var mesh = world.Mesh;
             Log($"world {_args.World} loaded in {watch.ElapsedMilliseconds} ms: {mesh.PolygonCount} polygons, managed {GC.GetTotalMemory(false) / 1048576} MB");
@@ -163,6 +167,8 @@ namespace GothicGodot.Spike
             if (_args.Get("pfx", "true") == "true")
                 BuildParticles(vfs, world, watch);
 
+            // --npc-draws=split: each sub-mesh and the head drawn on their own (the merged way's comparison).
+            ModelFactory.IsMergingSurfaces = _args.Get("npc-draws", "merged") != "split";
             var npcCount = _args.GetInt("npcs", 60);
             if (_args.Get("ai", "false") == "true")
             {
@@ -200,20 +206,20 @@ namespace GothicGodot.Spike
             var isCollisionEnabled = _args.Get("collision", "true") == "true";
             Godot.Material MaterialOf(WorldChunkBuilder.Kind kind) => materials[(int)kind];
             Dictionary<string, int> counts;
+            Node3D chunks;
+            var addStarted = 0L;
             if (cache.IsHit)
             {
                 var waitStarted = watch.ElapsedMilliseconds;
-                var chunks = cache.LoadScene(MaterialOf);
-                var addStarted = watch.ElapsedMilliseconds;
-                worldRoot.AddChild(chunks);
+                chunks = cache.LoadScene(MaterialOf);
+                addStarted = watch.ElapsedMilliseconds;
                 counts = cache.ReadInfo();
-                Log($"world scene: waited {addStarted - waitStarted} ms for the worker thread, " +
-                    $"added in {watch.ElapsedMilliseconds - addStarted} ms");
+                Log($"world scene: waited {addStarted - waitStarted} ms for the worker thread");
             }
             else
             {
-                var chunks = new Node3D { Name = "Chunks" };
-                worldRoot.AddChild(chunks);
+                // Outside the scene while it's built and saved: the collision far away is taken out before it enters.
+                chunks = new Node3D { Name = "Chunks" };
                 builder.CreateNodes(chunks, MaterialOf, isCollisionEnabled);
                 counts = new Dictionary<string, int>
                 {
@@ -226,7 +232,25 @@ namespace GothicGodot.Spike
                     cache.SaveScene(chunks, MaterialOf);
                     Log($"world saved to the cache in {watch.ElapsedMilliseconds - saveStarted} ms");
                 }
+
+                addStarted = watch.ElapsedMilliseconds;
             }
+
+            // --collision-near=<m>: only the collision this near the start goes in now, the rest a piece per frame
+            // (0: all of it now).
+            var collisionNear = _args.GetFloat("collision-near", 60f);
+            if (collisionNear > 0 && chunks.GetNodeOrNull<StaticBody3D>("WorldCollision") is { } collisionBody)
+            {
+                var start = GetCameraStart(world);
+                var streamer = new CollisionStreamer(collisionBody, start, collisionNear,
+                    () => _camera != null ? _camera.GlobalPosition : start) { Name = "CollisionStreamer" };
+                AddChild(streamer);
+                Log($"collision within {collisionNear} m now, {streamer.PendingCount} pieces " +
+                    $"({streamer.PendingTriangles} triangles) after loading");
+            }
+
+            worldRoot.AddChild(chunks);
+            Log($"world scene added in {watch.ElapsedMilliseconds - addStarted} ms");
 
             if (isCollisionEnabled)
                 Log($"collision: {counts.GetValueOrDefault("collision")} triangles");
@@ -447,12 +471,23 @@ namespace GothicGodot.Spike
 
             var far = _args.GetFloat("item-far", 25f);
             ItemInfo = ItemOf;
+            // --item-near=<m>: item bodies made once the camera is this near (default 10 m before they are drawn;
+            // 0: all at load).
+            var near = _args.GetFloat("item-near", far > 0 ? far + 10f : 0f);
+            NearSpawner spawner = null;
+            var start = _start;
+            if (near > 0)
+            {
+                spawner = new NearSpawner("items", () => _camera != null ? _camera.GlobalPosition : start, near, 8)
+                    { Name = "ItemSpawner" };
+                AddChild(spawner);
+            }
             CreateItem = (instance, transform) =>
                 _vobs.CreateItem(instance, ItemOf(instance)?.Visual, transform, materials[3], materials[4], far);
 
             var root = new Node3D { Name = "Items" };
             AddChild(root);
-            _vobs.BuildItems(root, materials[3], materials[4], instance => ItemOf(instance)?.Visual, far);
+            _vobs.BuildItems(root, materials[3], materials[4], instance => ItemOf(instance)?.Visual, far, spawner, start);
             // The scripts' own items (G2's startup puts plants on freepoints), now and later.
             var inserted = 0;
             if (_ai != null)
@@ -473,7 +508,8 @@ namespace GothicGodot.Spike
 
             if (inserted > 0)
                 Log($"items from the scripts: {inserted} of {_ai.InsertedItems.Count}");
-            Log($"items built in {watch.ElapsedMilliseconds} ms: {_vobs.ItemsBuilt} of {_vobs.ItemCount} grabbable");
+            Log($"items built in {watch.ElapsedMilliseconds} ms: {_vobs.ItemsBuilt} of {_vobs.ItemCount} grabbable" +
+                (spawner != null ? $" now ({spawner})" : ""));
         }
 
         private readonly List<GothicGodot.Interaction.WorldMob> _chests = new();
@@ -557,12 +593,29 @@ namespace GothicGodot.Spike
             AddChild(root);
             var pfx = new PfxBuilder(vfs);
 
+            // With a particle distance (the Quest's 40 m) the emitters are made once the camera comes near.
+            var far = _args.GetFloat("pfx-far", 0f);
+            NearSpawner spawner = null;
+            var start = _start;
+            if (far > 0)
+            {
+                spawner = new NearSpawner("particle emitters", () => _camera != null ? _camera.GlobalPosition : start,
+                    far + 10f, 4) { Name = "PfxSpawner" };
+                AddChild(spawner);
+            }
+
             void Walk(ZenKit.Vobs.IVirtualObject vob)
             {
                 var visual = vob.Visual?.Name;
                 if (vob.ShowVisual && visual != null && visual.EndsWith(".PFX", StringComparison.OrdinalIgnoreCase))
-                    pfx.Add(visual, new Transform3D(VobBuilder.ToGodot(vob.Rotation), MeshPart.ToGodot(vob.Position)),
-                        root);
+                {
+                    var transform = new Transform3D(VobBuilder.ToGodot(vob.Rotation), MeshPart.ToGodot(vob.Position));
+                    if (spawner == null)
+                        pfx.Add(visual, transform, root);
+                    else if (pfx.Prepare(visual))
+                        spawner.Add(transform.Origin, start, () => pfx.Add(visual, transform, root));
+                }
+
                 foreach (var child in vob.Children)
                     Walk(child);
             }
@@ -570,10 +623,10 @@ namespace GothicGodot.Spike
             foreach (var vob in world.RootObjects)
                 Walk(vob);
 
-            var far = _args.GetFloat("pfx-far", 0f);
             if (far > 0)
                 AddChild(new PfxCuller(pfx.Emitters, far));
-            Log($"particles built in {watch.ElapsedMilliseconds} ms: {pfx.EmitterCount} emitters, {pfx.MissingCount} missing");
+            Log($"particles built in {watch.ElapsedMilliseconds} ms: {pfx.EmitterCount} emitters now, {pfx.MissingCount} missing" +
+                (spawner != null ? $" ({spawner})" : ""));
         }
 
         /// <summary>

@@ -99,6 +99,7 @@ namespace GothicGodot.Interaction
         {
             var space = _player.GetWorld3D().DirectSpaceState;
             var target = door.Centre;
+            GothicGodot.Spike.CollisionStreamer.LoadNear(target, 5f);
             var across = door.GlobalBasis.Z.Normalized();
             foreach (var side in new[] { 1f, -1f })
             {

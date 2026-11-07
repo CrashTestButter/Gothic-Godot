@@ -73,10 +73,19 @@ namespace GothicGodot.Spike
             _images.Add(white);
         }
 
-        /// <summary>Whether the texture exists (compiled), e.g. a body texture variant.</summary>
-        public bool Exists(string textureName) =>
-            _layers.ContainsKey(textureName) ||
-            _vfs.Find($"{System.IO.Path.GetFileNameWithoutExtension(textureName).ToLowerInvariant()}-c.tex") != null;
+        private readonly Dictionary<string, bool> _exists = new(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>Whether the texture exists (compiled), e.g. a body texture variant; looked up once per name.</summary>
+        public bool Exists(string textureName)
+        {
+            if (_layers.ContainsKey(textureName))
+                return true;
+            if (_exists.TryGetValue(textureName, out var exists))
+                return exists;
+            exists = _vfs.Find($"{System.IO.Path.GetFileNameWithoutExtension(textureName).ToLowerInvariant()}-c.tex") != null;
+            _exists[textureName] = exists;
+            return exists;
+        }
 
         public int GetLayer(string textureName, out bool hasAlpha)
         {
