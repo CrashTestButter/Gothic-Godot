@@ -144,6 +144,8 @@ namespace GothicGodot.Interaction
             _clipTime = 0;
             _isClipLooping = isLooping;
             _clip.Apply(_skeleton, 0, isLooping);
+            // A held state of one frame (closed, open) is set once; the mob sleeps until it is used again.
+            SetProcess(!isLooping || clip.FrameCount > 1);
             return true;
         }
 

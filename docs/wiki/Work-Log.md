@@ -2,6 +2,23 @@
 
 Newest first.
 
+## 2026-11-07 - What the new features cost
+
+Old Camp on the desktop with the Quest benchmark settings (one Quest eye's resolution 2064x2208, MSAA 2x, objects 80 m, particles 40 m, animation culling, occluders, 134 scripted NPCs, the turning camera), all features on (746 items, 291 chests and doors, 608 sound objects, music, the dialog system) against all off:
+
+| | features on | off |
+|---|---|---|
+| GPU | 0.32 ms | 0.32 ms |
+| Render CPU | 0.48 ms | 0.43 ms |
+| Draw calls | 30 (12-63) | 29 (12-63) |
+| Physics | 0.33 ms | 0.38 ms |
+| AI | 5.9 ms per second | 5.7 ms per second |
+| Garbage collections in 15 s | 0 | 0 |
+| Native memory | 361 MB | 332 MB |
+
+- Found by looking at it: every chest and door re-applied its one-frame closed pose each frame (~1700 bone calls per frame for 291 mobs). Mobs now set a held state once and sleep until they are used.
+- On the Quest this should stay within the 120 Hz numbers measured before (119 FPS); to be confirmed when the headset is back.
+
 ## 2026-11-07 - Sound effects
 
 - Gothic's sound effects (775 C_SFX instances in G1's SFX.DAT): a name may have variants (FIRE_SMALL, FIRE_SMALL_A1, ...), one plays at random at the instance's volume.
