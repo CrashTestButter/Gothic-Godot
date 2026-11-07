@@ -56,9 +56,10 @@ namespace GothicGodot.Spike
                 }
             }
 
-            var world = new ZenKit.World(vfs, _args.World, GameVersion.Gothic1);
-            var mesh = world.Mesh.Cache();
-            Log($"world {_args.World} loaded in {watch.ElapsedMilliseconds} ms: {mesh.PolygonCount} polygons");
+            var world = new ZenKit.World(vfs, _args.World, _args.IsGothic2 ? GameVersion.Gothic2 : GameVersion.Gothic1);
+            // Not Cache(): that copies the whole mesh incl. its light maps into managed memory (G2: ~4.5 GB peak).
+            var mesh = world.Mesh;
+            Log($"world {_args.World} loaded in {watch.ElapsedMilliseconds} ms: {mesh.PolygonCount} polygons, managed {GC.GetTotalMemory(false) / 1048576} MB");
 
             var textures = new TextureArrayBuilder(vfs, _args.SliceSize);
             var materials = CreateMaterials();
@@ -74,7 +75,10 @@ namespace GothicGodot.Spike
             if (builder.OccluderMinArea > 0)
                 GetViewport().UseOcclusionCulling = true;
             builder.AddWorld(mesh, WorldChunkBuilder.GetLeafPolygons(world.BspTree.Cache()), textures, groundLight);
-            Log($"world polygons collected in {watch.ElapsedMilliseconds} ms");
+            // The cached ZenKit mesh is the biggest managed object graph (G2: several hundred MB); free it now.
+            mesh = null;
+            GC.Collect(2, GCCollectionMode.Forced, true, true);
+            Log($"world polygons collected in {watch.ElapsedMilliseconds} ms, managed {GC.GetTotalMemory(false) / 1048576} MB");
 
             // --vob-mode=nodes (one node per object), merged (objects in the world cells) or none.
             var vobMode = _args.IsVobsEnabled ? _args.Get("vob-mode", "merged") : "none";
@@ -108,7 +112,8 @@ namespace GothicGodot.Spike
                     AnimationFar = _args.GetFloat("anim-far", 0f) };
                 AddChild(ai);
                 ai.Init(vfs, humans, world, groundLight, _args.GetInt("hour", 12), GetCameraStart(world),
-                    _args.GetFloat("ai-radius", 150f));
+                    _args.GetFloat("ai-radius", 150f),
+                    _args.Get("startup", _args.IsGothic2 ? "STARTUP_NEWWORLD" : "STARTUP_OLDCAMP"));
                 Log($"AI NPCs spawned in {watch.ElapsedMilliseconds} ms: {ai.Count}");
             }
             else if (npcCount > 0)
@@ -117,7 +122,7 @@ namespace GothicGodot.Spike
                 var crowd = new HumanCrowd { Name = "Humans" };
                 AddChild(crowd);
                 _crowd = crowd;
-                crowd.Spawn(humans, world, npcCount, groundLight, _args.Get("bone-mode", "split"));
+                crowd.Spawn(humans, world, npcCount, groundLight, _args.Get("bone-mode", "split"), _args.IsGothic2);
                 Log($"humans spawned in {watch.ElapsedMilliseconds} ms: {crowd.Count}");
             }
 
@@ -422,7 +427,16 @@ namespace GothicGodot.Spike
                     return WorldChunkBuilder.ToGodot(point.Position);
             }
 
-            return GetOldCampCenter(world);
+            return _args.IsGothic2 ? GetCenter(world, "NW_CITY_") : GetOldCampCenter(world);
+        }
+
+        private static Vector3 GetCenter(ZenKit.World world, string prefix)
+        {
+            var points = world.WayNet.Points
+                .Where(p => p.Name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                .Select(p => MeshPart.ToGodot(p.Position))
+                .ToList();
+            return points.Count == 0 ? Vector3.Zero : points.Aggregate(Vector3.Zero, (sum, p) => sum + p) / points.Count;
         }
 
         private static Vector3 GetOldCampCenter(ZenKit.World world)

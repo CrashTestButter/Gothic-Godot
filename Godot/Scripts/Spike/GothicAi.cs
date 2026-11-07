@@ -50,6 +50,7 @@ namespace GothicGodot.Spike
         private double _logTime;
         private readonly Dictionary<string, int> _missingAnis = new();
         private int _slowCallsLogged;
+        private int _skippedMonsters;
         private readonly Dictionary<string, long> _allocatedByState = new();
         private long _allocatedInCalls;
         private long _allocatedAtLastLog;
@@ -57,7 +58,7 @@ namespace GothicGodot.Spike
         public int Count => _npcs.Count;
 
         public void Init(Vfs vfs, HumanFactory factory, ZenKit.World world, GroundLightSampler light, int hour,
-            Vector3 heroPosition, float radius)
+            Vector3 heroPosition, float radius, string startupFunction)
         {
             _factory = factory;
             _world = world;
@@ -88,7 +89,7 @@ namespace GothicGodot.Spike
             _vm.InitInstance(hero);
             _vm.GlobalHero = hero;
 
-            var startup = _vm.GetSymbolByName("STARTUP_OLDCAMP") ?? _vm.GetSymbolByName("STARTUP_SUB_OLDCAMP");
+            var startup = _vm.GetSymbolByName(startupFunction);
             if (startup != null)
                 Measure(() => _vm.Call(startup.Index));
 
@@ -102,8 +103,8 @@ namespace GothicGodot.Spike
             }
 
             _world = null;
-            GD.Print($"[Ai] startup inserted {_spawns.Count} NPCs, {_npcs.Count} within {radius} m spawned at " +
-                     $"{hour:00}:00, routines {_npcs.Sum(n => n.Routine.Count)} entries");
+            GD.Print($"[Ai] {startupFunction} inserted {_spawns.Count} NPCs, {_npcs.Count} within {radius} m spawned at " +
+                     $"{hour:00}:00 ({_skippedMonsters} monsters left out), routines {_npcs.Sum(n => n.Routine.Count)} entries");
         }
 
         private void AddEdge(string from, string to)
@@ -131,6 +132,13 @@ namespace GothicGodot.Spike
             {
                 _vm.GlobalSelf = instance;
                 Measure(() => _vm.Call(instance.DailyRoutine));
+            }
+
+            // Only humans in this test: monsters (G2 inserts sheep, wolves, ...) have their own skeletons.
+            if (npc.Visual != null && !npc.Visual.StartsWith("HUMANS", StringComparison.OrdinalIgnoreCase))
+            {
+                _skippedMonsters++;
+                return;
             }
 
             var armorMdm = GetArmorMdm(npc.ArmorInstance);
@@ -644,6 +652,12 @@ namespace GothicGodot.Spike
             {
                 _externals++;
                 _spawns.Add((instance, waypoint));
+            }));
+            _vm.RegisterExternal("Mdl_SetVisual", (DaedalusVm.ExternalFuncV<NpcInstance, string>)((npc, visual) =>
+            {
+                _externals++;
+                if (Npc(npc) is { } target)
+                    target.Visual = visual;
             }));
             _vm.RegisterExternal("Mdl_SetVisualBody",
                 (DaedalusVm.ExternalFuncV<NpcInstance, string, int, int, string, int, int, int>)(

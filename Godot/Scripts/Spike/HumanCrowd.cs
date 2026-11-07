@@ -19,6 +19,9 @@ namespace GothicGodot.Spike
             { "HUM_VLKL_ARMOR.MDM", "HUM_VLKM_ARMOR.MDM", "HUM_STTL_ARMOR.MDM", "HUM_STTM_ARMOR.MDM", "HUM_STTS_ARMOR.MDM", "HUM_BODY_NAKED0.MDM" };
         private static readonly string[] _heads =
             { "HUM_HEAD_BALD.MMB", "HUM_HEAD_FIGHTER.MMB", "HUM_HEAD_PONY.MMB", "HUM_HEAD_PSIONIC.MMB", "HUM_HEAD_THIEF.MMB", "HUM_HEAD_FATBALD.MMB" };
+        private static readonly string[] _g2GuardArmors = { "ARMOR_MIL_L.MDM", "ARMOR_MIL_M.MDM", "ARMOR_PAL_M.MDM" };
+        private static readonly string[] _g2TownArmors =
+            { "ARMOR_BAU_L.MDM", "ARMOR_BAU_M.MDM", "ARMOR_LEATHER_L.MDM", "ARMOR_NOV_L.MDM", "ARMOR_BARKEEPER.MDM", "HUM_BODY_NAKED0.MDM" };
         private static readonly string[] _idleClips = { "S_RUN", "S_LGUARD", "S_HGUARD", "S_RUN", "S_SIT" };
 
         private class Npc
@@ -47,12 +50,17 @@ namespace GothicGodot.Spike
             return npc?.Root.GlobalTransform;
         }
 
-        public void Spawn(HumanFactory factory, ZenKit.World world, int count, GroundLightSampler light, string boneMode)
+        public void Spawn(HumanFactory factory, ZenKit.World world, int count, GroundLightSampler light, string boneMode,
+            bool isGothic2 = false)
         {
+            var guardArmors = isGothic2 ? _g2GuardArmors : _guardArmors;
+            var campArmors = isGothic2 ? _g2TownArmors : _campArmors;
             _boneMode = boneMode;
             var random = new Random(7);
             var points = world.WayNet.Points
-                .Where(p => p.Name.StartsWith("OCR_") || p.Name.StartsWith("OCC_") || p.Name.StartsWith("OC_"))
+                .Where(p => isGothic2
+                    ? p.Name.StartsWith("NW_CITY_")
+                    : p.Name.StartsWith("OCR_") || p.Name.StartsWith("OCC_") || p.Name.StartsWith("OC_"))
                 .OrderBy(_ => random.Next())
                 .Take(count)
                 .ToList();
@@ -60,7 +68,7 @@ namespace GothicGodot.Spike
             foreach (var point in points)
             {
                 var isGuard = point.Name.StartsWith("OCC_") || random.Next(4) == 0;
-                var armor = isGuard ? _guardArmors[random.Next(_guardArmors.Length)] : _campArmors[random.Next(_campArmors.Length)];
+                var armor = isGuard ? guardArmors[random.Next(guardArmors.Length)] : campArmors[random.Next(campArmors.Length)];
                 var body = factory.GetSkinnedMesh(armor) ?? factory.GetSkinnedMesh("HUM_BODY_NAKED0.MDM");
                 var clip = factory.GetClip(_idleClips[random.Next(_idleClips.Length)]) ?? factory.GetClip("S_RUN");
                 if (body == null || clip == null)

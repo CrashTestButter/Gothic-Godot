@@ -2,6 +2,19 @@
 
 Newest first.
 
+## 2026-11-07 - Gothic 2: Khorinis
+
+![Khorinis from the hills](images/khorinis-overview.png)
+![Roofs of the lower quarter](images/khorinis-roofs.png)
+![A street](images/khorinis-street.png)
+![Upper quarter](images/khorinis-upper-quarter.png)
+
+- `--game=2`: NEWWORLD.ZEN with Gothic 2's data, camera in the middle of the city waypoints, G2's STARTUP_NEWWORLD for the scripted NPCs (1054 inserted, 180 humans within 150 m of the city, 59 monsters left out as the spike only has the human skeleton), armours and heads from the scripts.
+- G2 world: 461283 polygons, 12410 objects of 373 meshes (9 not found), 666 particle emitters, 508 texture layers, 2.7 million triangles with the objects merged.
+- **ZenKit's world mesh cache doesn't scale**: `Mesh.Cache()` copies the whole mesh including its light maps into managed memory; G2 peaked at ~4.5 GB and ran out of memory under a 5 GB limit. Reading the mesh natively (positions and features in bulk, polygons one by one, like Gothic-Unity does) needs 98 MB and is faster too: G1 world polygons 0.5 s instead of 1.6 s, G2 loads in 4.7 s on the desktop.
+- Collision now only for the world itself (G2: 462k triangles instead of 2.7 million with the objects).
+- Quest numbers for Khorinis: pending - the headset dropped off USB (battery after hours with the proximity sensor overridden).
+
 ## 2026-11-07 - Frame spikes: garbage from ZenKit's external calls
 
 - With the GPU at 71-74% at 120 Hz, 6-8 frames per second still missed. Logging what long frames had in common: 2-16 ms of AI time in a single script call.

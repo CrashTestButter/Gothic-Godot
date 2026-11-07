@@ -32,11 +32,15 @@ namespace GothicGodot.Spike
             }
         }
 
-        public string DataPath => Get("data", OS.GetName() == "Android"
-            ? "/storage/emulated/0/Android/data/com.gothic.godot/files/Gothic1"
-            : System.Environment.GetEnvironmentVariable("HOME") + "/.cache/gothic-g1-vanilla");
+        /// <summary>1 = Gothic 1, 2 = Gothic 2 (Night of the Raven).</summary>
+        public int Game => GetInt("game", 1);
+        public bool IsGothic2 => Game == 2;
 
-        public string World => Get("world", "WORLD.ZEN");
+        public string DataPath => Get("data", OS.GetName() == "Android"
+            ? $"/storage/emulated/0/Android/data/com.gothic.godot/files/Gothic{Game}"
+            : System.Environment.GetEnvironmentVariable("HOME") + $"/.cache/gothic-g{Game}-vanilla");
+
+        public string World => Get("world", IsGothic2 ? "NEWWORLD.ZEN" : "WORLD.ZEN");
         public int SliceSize => GetInt("slice", 256);
         public float CellSize => GetFloat("cell", 64f);
         public float QuitAfterSeconds => GetFloat("quit-after", 0f);

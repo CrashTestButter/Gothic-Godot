@@ -100,6 +100,8 @@ namespace GothicGodot.Spike
             foreach (var polygonId in polygonIds)
             {
                 var polygon = polygons[polygonId];
+                if (polygon == null)
+                    continue;
                 if (polygon.IsPortal || polygon.IsGhostOccluder || polygon.PositionIndices.Count < 3)
                     continue;
 
@@ -137,6 +139,13 @@ namespace GothicGodot.Spike
                     chunk.Indices.Add(AddCorner(p + 1));
                     chunk.Indices.Add(AddCorner(p));
                 }
+            }
+
+            // The corner dedup tables are only needed while the world polygons are added.
+            foreach (var chunk in _chunks.Values)
+            {
+                chunk.Dedup.Clear();
+                chunk.Dedup.TrimExcess();
             }
         }
 
@@ -233,7 +242,8 @@ namespace GothicGodot.Spike
                 if (OccluderMinArea > 0 && !isObject && kind == Kind.Opaque)
                     AddOccluder(parent, chunk, $"{x}_{z}");
 
-                if (body != null && kind != Kind.Water)
+                // Collision for the world itself; merged objects (millions of triangles in G2) are left out here.
+                if (body != null && kind != Kind.Water && !isObject)
                 {
                     var faces = new Vector3[chunk.Indices.Count];
                     for (var i = 0; i < faces.Length; i++)

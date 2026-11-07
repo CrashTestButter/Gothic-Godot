@@ -198,7 +198,10 @@ namespace GothicGodot.Spike
             {
                 var sum = System.Numerics.Vector3.Zero;
                 foreach (var entry in weights[p])
-                    sum += entry.Weight * System.Numerics.Vector3.Transform(entry.Position, _gothicGlobals[entry.NodeIndex]);
+                {
+                    if (entry.NodeIndex < _gothicGlobals.Length)
+                        sum += entry.Weight * System.Numerics.Vector3.Transform(entry.Position, _gothicGlobals[entry.NodeIndex]);
+                }
                 positions[p] = sum;
             }
 
