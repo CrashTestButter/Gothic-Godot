@@ -24,4 +24,4 @@ The goal stays the same as in Gothic-Unity: Gothic 1 and 2 smooth and native on 
 
 ## Status
 
-Research done, spike in progress. See [[Work-Log]].
+Research done, spike in progress: G1 and G2 worlds render on the Quest 3 at 120 Hz; on the desktop the spike plays - walking, talking with voices and subtitles, music, items, the bag, eating and drinking, chests, doors, lock picks, monsters, NPCs talking among themselves. Headset tests of the new parts are pending. See [[Spike-Plan]] and [[Work-Log]].

@@ -121,6 +121,9 @@ namespace GothicGodot.Spike
         public readonly List<Vector3> Path = new();
         public FreePoint CurrentFreePoint;
 
+        /// <summary>The routine entry running now (-1: none); a new one ends the state and starts the next.</summary>
+        public int RoutineIndex = -1;
+
         /// <summary>In a dialog with the hero: AI and routine wait, the dialog plays the animations.</summary>
         public bool IsInDialog;
 

@@ -13,6 +13,10 @@
 - Screenshots: `--shots="x,y,z>tx,ty,tz;..." --screenshot=/path/shot.png` (Godot coordinates, metres), one file per shot, quits after the last.
 - Without a window: `gamescope --backend headless -W 1600 -H 900 -- godot --path Godot --resolution 1600x900 -- ...`
 - Output: `[Spike]` load times, `[Perf]` one line per second (FPS, draw calls, objects, garbage collections).
+- Headless shots: `Godot/tools/render.sh <width>x<height> <shot.png> -- <spike args>` (gamescope, memory cap, Godot's Dummy audio driver; `AUDIO_DRIVER=PulseAudio` to hear it).
+- Playable: `--player=true --ai=true` (desktop: WASD, mouse, Shift, Q/E, T teleport, F talk / open, right mouse take, B put away, Tab bag, U eat / drink, arrow keys lock picks). `--game=2` for Gothic 2.
+- Scripted tests: `Godot/tools/run-tests.sh [1|2] [dialog grab bag use chest door lock]` runs each one headless and prints PASS / FAIL (`--dialog-test`, `--grab-test=true|bag|use`, `--chest-test`, `--door-test`, `--lock-test`; also `--walk-test=<s>`, `--teleport-test=<s>`).
+- Helpers: `--record-audio=<file.wav>` saves the mix, `--count-externals` lists the scripts' externals the spike lacks, `--shots=%MODEL,<m>` frames the first NPC of a model, `--open-chests=true`, `--hand-preview=true`.
 
 ## Android / Quest
 

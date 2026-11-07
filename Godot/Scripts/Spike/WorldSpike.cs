@@ -21,6 +21,13 @@ namespace GothicGodot.Spike
         private double _time;
         private bool _isScreenshotTaken;
         private Camera3D _camera;
+        private GameClock _clock;
+        private ShaderMaterial[] _materials;
+        private Godot.Environment _environment;
+        private ProceduralSkyMaterial _sky;
+        private GothicGodot.Audio.GothicMusic _music;
+        private double _daylightTime;
+        private float _lastDaylight = -1f;
         private string[] _shots = Array.Empty<string>();
         private int _shotIndex = -1;
         private double _shotTime;
@@ -70,7 +77,11 @@ namespace GothicGodot.Spike
             Log($"world {_args.World} loaded in {watch.ElapsedMilliseconds} ms: {mesh.PolygonCount} polygons, managed {GC.GetTotalMemory(false) / 1048576} MB");
 
             var textures = new TextureArrayBuilder(vfs, _args.SliceSize);
-            var materials = CreateMaterials();
+            var materials = _materials = CreateMaterials();
+            // Gothic's time of day: --hour to start, --time-speed (1 = Gothic's 100 minute day, 0 = stands still).
+            _clock = new GameClock { Name = "Clock", Speed = _args.GetFloat("time-speed", 1f) };
+            AddChild(_clock);
+            _clock.SetTime(_args.GetInt("hour", 12));
             var worldRoot = new Node3D { Name = "World" };
             AddChild(worldRoot);
 
@@ -86,6 +97,7 @@ namespace GothicGodot.Spike
             // The cached ZenKit mesh is the biggest managed object graph (G2: several hundred MB); free it now.
             mesh = null;
             GC.Collect(2, GCCollectionMode.Forced, true, true);
+            Log($"outdoor polygons {builder.OutdoorPolygons}, indoor {builder.IndoorPolygons}");
             Log($"world polygons collected in {watch.ElapsedMilliseconds} ms, managed {GC.GetTotalMemory(false) / 1048576} MB");
 
             // --vob-mode=nodes (one node per object), merged (objects in the world cells) or none.
@@ -197,7 +209,7 @@ namespace GothicGodot.Spike
             if (_args.Get("music", "true") == "true")
             {
                 var start = GetCameraStart(world);
-                var music = new GothicGodot.Audio.GothicMusic { Name = "Music" };
+                var music = _music = new GothicGodot.Audio.GothicMusic { Name = "Music" };
                 AddChild(music);
                 music.Init(vfs, world, () => _camera != null ? _camera.GlobalPosition : start, _args.GetInt("hour", 12),
                     _args.GetFloat("music-volume", 0.33f));
@@ -233,9 +245,45 @@ namespace GothicGodot.Spike
 
         private bool _areChestsOpened;
 
+        /// <summary>The clock's minute for the AI and the music; light and sky follow the daylight once a second.</summary>
+        private void OnMinute(int minute)
+        {
+            _ai?.SetMinute(minute);
+            _music?.SetHour(minute / 60);
+        }
+
+        private static readonly Color _daySkyTop = new(0.32f, 0.45f, 0.62f);
+        private static readonly Color _daySkyHorizon = new(0.68f, 0.72f, 0.74f);
+        private static readonly Color _dayFog = new(0.62f, 0.66f, 0.7f);
+        private static readonly Color _nightSkyTop = new(0.02f, 0.03f, 0.07f);
+        private static readonly Color _nightSkyHorizon = new(0.08f, 0.09f, 0.14f);
+        private static readonly Color _nightFog = new(0.05f, 0.06f, 0.09f);
+
+        private void UpdateDaylight(double delta)
+        {
+            _daylightTime += delta;
+            if (_daylightTime < 1.0 || _sky == null)
+                return;
+            _daylightTime = 0;
+            var day = _clock.Daylight;
+            if (Mathf.Abs(day - _lastDaylight) < 0.005f)
+                return;
+            _lastDaylight = day;
+            // Gothic's baked light stays; outdoors gets darker at night like the engine's sky light (a third at night).
+            var skyLight = Mathf.Lerp(0.35f, 1f, day);
+            foreach (var material in _materials)
+                material.SetShaderParameter("sky_light", skyLight);
+            _sky.SkyTopColor = _nightSkyTop.Lerp(_daySkyTop, day);
+            _sky.SkyHorizonColor = _nightSkyHorizon.Lerp(_daySkyHorizon, day);
+            _sky.GroundHorizonColor = _sky.SkyHorizonColor * 0.8f;
+            _environment.FogLightColor = _nightFog.Lerp(_dayFog, day);
+        }
+
         public override void _Process(double delta)
         {
             _time += delta;
+            if (_args.Get("dusk", "false") != "true")
+                UpdateDaylight(delta);
             // --open-chests: every unlocked chest opens after a second (for shots of the lids).
             if (!_areChestsOpened && _time > 1 && _args.Get("open-chests", "false") == "true")
             {
@@ -572,6 +620,9 @@ namespace GothicGodot.Spike
                 TonemapMode = Godot.Environment.ToneMapper.Linear
             };
             AddChild(new WorldEnvironment { Environment = environment });
+            _environment = environment;
+            _sky = sky;
+            _clock.MinuteChanged += OnMinute;
         }
 
         private static void CollectLoadingGarbage()

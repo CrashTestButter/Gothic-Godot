@@ -23,8 +23,10 @@ No-go items get a fix path in [[Godot-Risks]] or end the study.
 ## Result so far (2026-11-07)
 
 - Native libraries, world, objects, humans, particles: done on desktop and Quest 3.
-- Go criteria for the Old Camp on the Quest 3: 72 Hz held (71.5 average), CPU 19-25%, no garbage collection, 239-360 draw calls. **Go** for rendering and animation.
-- Not yet measured: game logic (Daedalus VM, AI, physics of NPCs, audio), G2 Khorinis, Quest 2, Mono AOT / NativeAOT variants.
+- Go criteria for the Old Camp on the Quest 3: 72 Hz held (71.5 average), CPU 19-25%, no garbage collection, 239-360 draw calls. **Go** for rendering and animation. At 120 Hz with 134 scripted NPCs, occlusion culling and the ZenKitCS patch: 119.1 FPS, no garbage collection.
+- Runtime: MonoVM and NativeAOT both run on the Quest; Daedalus VM 6 us per dialog condition on MonoVM (NativeAOT 7% faster) - the runtime isn't the bottleneck.
+- Game logic built on the desktop since (see [[Work-Log]]), each with a headless scripted test: walking and teleport, dialogs with voices and subtitles, music, items (take, throw, bag, eat, drink), the hero's hands, monsters, chests, doors, keys and lock picks, sound effects, freepoints and NPC smalltalk. With all of them on, the desktop cost at the Quest settings barely moves (render CPU +0.05 ms, GPU the same); AI rose to 14 ms per second as more states run.
+- Not yet measured on a headset: everything since the 120 Hz run (the Quest was disconnected), G2 Khorinis, Quest 2, the XR input (controllers and hands).
 
 ## Baseline (Gothic-Unity, Quest 3, 2026-11-03)
 

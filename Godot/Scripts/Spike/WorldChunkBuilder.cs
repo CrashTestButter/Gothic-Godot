@@ -48,6 +48,8 @@ namespace GothicGodot.Spike
 
         public int ChunkCount { get; private set; }
         public int TriangleCount { get; private set; }
+        public int OutdoorPolygons { get; private set; }
+        public int IndoorPolygons { get; private set; }
 
         public WorldChunkBuilder(float cellSize)
         {
@@ -111,6 +113,13 @@ namespace GothicGodot.Spike
                     continue;
 
                 var chunk = GetChunk(ToGodot(positions[polygon.PositionIndices[0]]), info.Kind);
+                // Colour alpha: outdoors (follows the daylight) or inside a building - a polygon of an indoor portal room
+                // (sector). The outdoor flag itself is set on almost none of G1's polygons.
+                var outdoor = polygon.IsSector ? 0f : 1f;
+                if (outdoor > 0)
+                    OutdoorPolygons++;
+                else
+                    IndoorPolygons++;
 
                 int AddCorner(int corner)
                 {
@@ -124,7 +133,7 @@ namespace GothicGodot.Spike
                     chunk.Normals.Add(new Vector3(feature.Normal.X, feature.Normal.Y, -feature.Normal.Z));
                     var light = feature.Light;
                     chunk.Colors.Add(new Color(((light >> 16) & 0xFF) / 255f, ((light >> 8) & 0xFF) / 255f,
-                        (light & 0xFF) / 255f, ((light >> 24) & 0xFF) / 255f));
+                        (light & 0xFF) / 255f, outdoor));
                     chunk.Uvs.Add(new Vector2(feature.Texture.X, feature.Texture.Y));
                     chunk.Layers.Add(new Vector2(info.Layer, 0));
                     chunk.Dedup[cornerKey] = index;

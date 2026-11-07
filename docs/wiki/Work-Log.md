@@ -2,6 +2,17 @@
 
 Newest first.
 
+## 2026-11-07 - Time of day
+
+![The Old Camp at 19:00](images/time-1900.png)
+![The same view at 23:00](images/time-2300.png)
+
+- A game clock with Gothic's pace (Gothic-Unity's GameTimeService: one day is 6000 real seconds); `--hour` starts it, `--time-speed` speeds it up (0 stops it).
+- Routines: when an NPC's routine entry changes, its state ends (its _END function runs) and the next entry starts, like the engine's routine manager. Old Camp from 19:00 at 40x: patrolling guards step every 5-10 minutes, 18 NPCs change at 21:00, 24 at 22:00 (bed time). First version re-triggered some NPCs every minute (their _END starts another state, so the new entry was never recorded); the entry is taken at the switch now.
+- Light: outdoor surfaces fade to a third of their baked light at night (dawn 5-7, dusk 19-21), the sky and fog with them; inside buildings stays as baked. Outdoor = not part of an indoor portal room (the polygon's sector flag, 17637 of 103108 polygons in G1); the polygons' own outdoor flag is set on almost none in G1. Objects, NPCs and items take the flag from the ground below them.
+- Music switches to the zone's night theme at 22:00 and back at 4:00.
+- Not in it yet: Gothic's sky (sun, moon, clouds, stars), Wld_SetTime from the scripts, sleeping in beds to pass time.
+
 ## 2026-11-07 - NPCs talk among themselves: freepoints and SVM lines
 
 - Freepoints (zCVobSpot, e.g. FP_SMALLTALK_OC_01) with Gothic-Unity's rules: Wld_IsFPAvailable / Wld_IsNextFPAvailable look within 7 m, AI_GotoFP / AI_GotoNextFP walk to the nearest free one (over the waynet to its nearest waypoint, then straight) and hold it while the NPC is there, the old one is let go; Npc_IsOnFP, AI_AlignToFP. Also Wld_DetectNpc(Ex) (another NPC or the hero within the senses range by instance, state and guild; becomes `other`) and AI_TurnToNpc.

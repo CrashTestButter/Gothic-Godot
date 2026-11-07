@@ -212,6 +212,17 @@ namespace GothicGodot.Audio
             _logTime = 0;
         }
 
+        /// <summary>Day (4:00-21:00) or night: the zone's other theme plays.</summary>
+        public void SetHour(int hour)
+        {
+            var isNight = hour < 4 || hour > 21;
+            if (isNight == _isNight)
+                return;
+            _isNight = isNight;
+            GD.Print($"[Music] {(isNight ? "night" : "day")} falls");
+            Play();
+        }
+
         private IZoneMusic FindZone(Vector3 position)
         {
             if (_currentZone != null && _zones.Any(z => z.Zone == _currentZone && z.Box.HasPoint(position)))

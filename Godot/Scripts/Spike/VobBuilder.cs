@@ -86,7 +86,7 @@ namespace GothicGodot.Spike
                         positions[i] = transform * part.Positions[i];
                         normals[i] = (transform.Basis * part.Normals[i]).Normalized();
                         var shade = 0.8f + 0.35f * Mathf.Max(normals[i].Dot(_sunDirection), 0f);
-                        colors[i] = new Color(tint.R * shade, tint.G * shade, tint.B * shade);
+                        colors[i] = new Color(tint.R * shade, tint.G * shade, tint.B * shade, tint.A);
                     }
 
                     chunks.AddObject(transform.Origin, part.Kind, positions, normals, part.Uvs, part.Layer, colors,

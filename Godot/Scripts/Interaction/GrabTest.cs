@@ -148,7 +148,9 @@ namespace GothicGodot.Interaction
                 case 20 when _time > 0.3:
                     _bag.Stow(grab);
                     var hero = _hero?.Invoke();
-                    // A healing potion if there is one (the hero also carries mana potions), else any food or drink.
+                    // A healing potion: G1's hero starts with only the letter, so the test brings one.
+                    if (_bag.Inventory["ITFO_POTION_HEALTH_01"] == 0 && _bag.Inventory["ITPO_HEALTH_01"] == 0)
+                        _bag.Inventory.Add(IsConsumable("ITPO_HEALTH_01") ? "ITPO_HEALTH_01" : "ITFO_POTION_HEALTH_01");
                     var items = _bag.Inventory.Items.ToList();
                     var potion = items.FindIndex(i => IsConsumable(i) && i.Contains("HEALTH"));
                     if (potion < 0)

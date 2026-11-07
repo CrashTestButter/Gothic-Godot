@@ -467,17 +467,50 @@ namespace GothicGodot.Spike
             }
         }
 
+        /// <summary>
+        /// A game minute passed: NPCs whose routine entry changes end their state (its _END function runs) and then
+        /// start the next entry, like the engine's routine manager.
+        /// </summary>
+        public void SetMinute(int minute)
+        {
+            if (minute == _minuteOfDay)
+                return;
+            _minuteOfDay = minute;
+            var switched = 0;
+            foreach (var npc in _npcs)
+            {
+                if (npc.Routine.Count == 0 || npc.IsInDialog || npc.State == GothicNpc.LoopState.None)
+                    continue;
+                var index = ActiveRoutineIndex(npc);
+                if (index < 0 || index == npc.RoutineIndex)
+                    continue;
+                npc.Actions.Clear();
+                npc.Current = null;
+                npc.State = GothicNpc.LoopState.End;
+                // Taken now: an _END function may start another state, and the switch must not repeat each minute.
+                npc.RoutineIndex = index;
+                switched++;
+            }
+
+            if (switched > 0)
+                GD.Print($"[Ai] {minute / 60:00}:{minute % 60:00} {switched} NPCs change to their next routine entry");
+        }
+
+        private int ActiveRoutineIndex(GothicNpc npc)
+        {
+            for (var i = 0; i < npc.Routine.Count; i++)
+                if (IsActive(npc.Routine[i], _minuteOfDay))
+                    return i;
+            return -1;
+        }
+
         private void StartRoutine(GothicNpc npc)
         {
             var entry = default(GothicNpc.RoutineEntry);
-            foreach (var candidate in npc.Routine)
-            {
-                if (IsActive(candidate, _minuteOfDay))
-                {
-                    entry = candidate;
-                    break;
-                }
-            }
+            var active = ActiveRoutineIndex(npc);
+            npc.RoutineIndex = active;
+            if (active >= 0)
+                entry = npc.Routine[active];
 
             if (entry.State == 0 && npc.Routine.Count > 0)
                 entry = npc.Routine[0];
