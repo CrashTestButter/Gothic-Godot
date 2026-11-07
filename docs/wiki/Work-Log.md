@@ -18,7 +18,8 @@ Old Camp, 134 scripted NPCs (routines, AI states), objects to 80 m, particles to
 - Godot's own render timers (viewport render time measurement) on the Quest at 120 Hz, MSAA 4x: the main thread records a frame in about 1.0 ms (frame setup 0.2 ms), the GPU needs 7.4-8.6 ms per frame - right at the 8.3 ms budget. The missed frames are GPU frames running over, not the main thread (a first reading of VrApi's CPU-to-GPU latency suggested ~6 ms main thread; that number includes waiting).
 - Godot's separate render thread is no help here (46 FPS, many garbage collections).
 - Animation culling (hide and stop NPCs beyond the object distance, keep the pose outside the view, update far ones less often) cuts the bone work from ~2 ms to under 1 ms; the rest is the per-NPC distance and view check.
-- Next for 120 Hz: GPU work - occlusion culling (castle and palisade hide most of the camp), cheaper trees (alpha test, lower detail far away), MSAA 2x as the 120 Hz default.
+- Occlusion culling with occluders built at runtime (per 64 m cell, world triangles of at least 2 m²; Godot's ArrayOccluder3D) at 120 Hz, MSAA 4x: app GPU 6.85 -> 4.97 ms, draws 256-383 -> 20-131, FPS 112.8 -> 116.0, stale frames 10.8 -> 8.3 per second; the CPU pays ~0.35 ms per frame for it. With MSAA 2x on top: 4.67 ms GPU, 116.0 FPS, 6.4 stale per second.
+- With the GPU at 71-74% the remaining 6-8 missed frames per second are spikes, not load: next is finding them (frame time histogram against garbage collections, AI state loops, the particle culler).
 
 ## 2026-11-07 - Daily routines and AI states on the Quest
 

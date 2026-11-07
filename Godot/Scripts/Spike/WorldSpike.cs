@@ -66,7 +66,13 @@ namespace GothicGodot.Spike
             AddChild(worldRoot);
 
             var groundLight = new GroundLightSampler();
-            var builder = new WorldChunkBuilder(_args.CellSize) { ObjectFarDistance = _args.GetFloat("object-far", 0f) };
+            var builder = new WorldChunkBuilder(_args.CellSize)
+            {
+                ObjectFarDistance = _args.GetFloat("object-far", 0f),
+                OccluderMinArea = _args.GetFloat("occluder-area", 0f)
+            };
+            if (builder.OccluderMinArea > 0)
+                GetViewport().UseOcclusionCulling = true;
             builder.AddWorld(mesh, WorldChunkBuilder.GetLeafPolygons(world.BspTree.Cache()), textures, groundLight);
             Log($"world polygons collected in {watch.ElapsedMilliseconds} ms");
 
@@ -123,6 +129,8 @@ namespace GothicGodot.Spike
             builder.CreateNodes(worldRoot, kind => materials[(int)kind], isCollisionEnabled);
             if (isCollisionEnabled)
                 Log($"collision: {builder.CollisionTriangleCount} triangles");
+            if (builder.OccluderMinArea > 0)
+                Log($"occluders: {builder.OccluderTriangleCount} triangles of at least {builder.OccluderMinArea} m²");
             Log($"world nodes created in {watch.ElapsedMilliseconds} ms: {builder.ChunkCount} chunks, " +
                 $"{builder.TriangleCount} triangles, {textures.LayerCount} texture layers, {textures.MissingCount} missing");
 

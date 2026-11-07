@@ -161,6 +161,13 @@ namespace GothicGodot.Spike
         public int CollisionTriangleCount { get; private set; }
 
         /// <summary>
+        /// World triangles at least this big (m²) become occluders per cell (0 = no occlusion culling): walls,
+        /// palisades, terrain - what hides the camp behind it.
+        /// </summary>
+        public float OccluderMinArea { get; set; }
+        public int OccluderTriangleCount { get; private set; }
+
+        /// <summary>
         /// Objects further than this (metres) are not drawn, like Gothic's object far clip; 0 = merged into the
         /// world cells and drawn as far as the world. Objects then get their own cell meshes.
         /// </summary>
@@ -223,6 +230,9 @@ namespace GothicGodot.Spike
                 }
                 parent.AddChild(instance);
 
+                if (OccluderMinArea > 0 && !isObject && kind == Kind.Opaque)
+                    AddOccluder(parent, chunk, $"{x}_{z}");
+
                 if (body != null && kind != Kind.Water)
                 {
                     var faces = new Vector3[chunk.Indices.Count];
@@ -240,6 +250,35 @@ namespace GothicGodot.Spike
 
             _chunks.Clear();
             _objectChunks.Clear();
+        }
+
+        private void AddOccluder(Node3D parent, Chunk chunk, string name)
+        {
+            var vertices = new List<Vector3>();
+            var indices = new List<int>();
+            var minDoubleArea = OccluderMinArea * 2f;
+            for (var i = 0; i < chunk.Indices.Count; i += 3)
+            {
+                var a = chunk.Positions[chunk.Indices[i]];
+                var b = chunk.Positions[chunk.Indices[i + 1]];
+                var c = chunk.Positions[chunk.Indices[i + 2]];
+                if ((b - a).Cross(c - a).Length() < minDoubleArea)
+                    continue;
+                indices.Add(vertices.Count);
+                vertices.Add(a);
+                indices.Add(vertices.Count);
+                vertices.Add(b);
+                indices.Add(vertices.Count);
+                vertices.Add(c);
+            }
+
+            if (indices.Count == 0)
+                return;
+
+            var occluder = new ArrayOccluder3D();
+            occluder.SetArrays(vertices.ToArray(), indices.ToArray());
+            parent.AddChild(new OccluderInstance3D { Name = $"Occluder_{name}", Occluder = occluder });
+            OccluderTriangleCount += indices.Count / 3;
         }
 
         private Chunk GetChunk(Vector3 position, Kind kind) => GetChunk(position, kind, _chunks);
