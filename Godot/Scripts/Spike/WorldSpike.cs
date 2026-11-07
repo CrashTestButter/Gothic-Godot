@@ -94,7 +94,17 @@ namespace GothicGodot.Spike
                 BuildParticles(vfs, world, watch);
 
             var npcCount = _args.GetInt("npcs", 60);
-            if (npcCount > 0)
+            if (_args.Get("ai", "false") == "true")
+            {
+                // Real Old Camp NPCs with routines and AI states instead of the idle crowd.
+                var humans = new HumanFactory(vfs, textures, materials[3], materials[4]);
+                var ai = new GothicAi { Name = "GothicAi" };
+                AddChild(ai);
+                ai.Init(vfs, humans, world, groundLight, _args.GetInt("hour", 12), GetCameraStart(world),
+                    _args.GetFloat("ai-radius", 150f));
+                Log($"AI NPCs spawned in {watch.ElapsedMilliseconds} ms: {ai.Count}");
+            }
+            else if (npcCount > 0)
             {
                 var humans = new HumanFactory(vfs, textures, materials[3], materials[4]);
                 var crowd = new HumanCrowd { Name = "Humans" };

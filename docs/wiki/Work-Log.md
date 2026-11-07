@@ -2,6 +2,29 @@
 
 Newest first.
 
+## 2026-11-07 - Daily routines and AI states on the Quest
+
+The question: animations and daily routines cost time too. So the spike now runs the Old Camp's real NPCs the way Gothic-Unity's AiHandler does:
+- G1's STARTUP_OLDCAMP inserts them (137, 134 within 150 m of the camp), each initialised from its Daedalus instance; the look comes from `Mdl_SetVisualBody` (body, head, armour item's visual).
+- Each NPC's daily routine (`Rtn_*` -> `TA_*` -> `TA_Min`, 655 entries) places it at its current routine waypoint (12:00) and starts its AI state.
+- State machine like AiHandler: state start, `_LOOP` when the action queue is empty and at most once per perception time, `_END`, next routine; active perception (assess player) on the perception timer when the hero is within 20 m.
+- Actions from the scripts: `AI_PlayAni` (with the animation's follow-up), `AI_Wait`, `AI_GotoWP` (walking the waynet), `AI_StartState`; about 20 externals implemented, the rest default.
+
+Quest 3, 72 Hz, objects to 80 m, particles to 40 m, 134 scripted NPCs:
+
+| | Value |
+|---|---|
+| FPS | 71.8 average, 70 minimum |
+| App GPU | 9.13 ms (77% busy) |
+| CPU | 26% (busiest core 33%) |
+| AI (scripts and actions) | 15-50 ms per second, 0.2-0.7 ms per frame |
+| of that in the Daedalus VM | 10-29 ms per second |
+| Script activity | 86-123 state loops, 6-9 perceptions, 3300-4900 externals per second |
+| Animation (bone writes) | 2.3-2.6 ms per frame |
+| Garbage collection | at most one small collection in a second |
+
+The routines and states cost far less than feared (a few percent of one core). Per frame, the bone writes are the bigger CPU cost - the bulk bone path from [[Godot-Risks]] R4 is worth doing. Not in the load yet: NPCs perceiving each other (fights, gossip), dialogs, physics and collision of NPCs, sound, animation blending and overlays; most externals are still the cheap default.
+
 ## 2026-11-07 - Game logic on the Quest: Daedalus VM
 
 GOTHIC.DAT in ZenKit's Daedalus VM, all 1524 dialog condition functions (DIA_*_CONDITION) called in a loop; externals land in C# (three typed ones as Gothic-Unity registers them, the rest in the default handler), so every external is a native to C# callback plus the P/Invokes ZenKit uses to read its arguments.

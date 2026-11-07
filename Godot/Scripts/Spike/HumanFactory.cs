@@ -17,6 +17,7 @@ namespace GothicGodot.Spike
         public class Clip
         {
             public string Name;
+            public string Next;
             public int FrameCount;
             public float Fps;
             public int[] Nodes;
@@ -157,6 +158,7 @@ namespace GothicGodot.Spike
                 clip = new Clip
                 {
                     Name = name,
+                    Next = string.IsNullOrEmpty(animation.Next) ? null : animation.Next.ToUpperInvariant(),
                     FrameCount = frames,
                     Fps = animation.Fps,
                     Nodes = nodes,
