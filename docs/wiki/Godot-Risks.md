@@ -24,12 +24,14 @@ How tied Gothic-Unity is to Unity today (split/14, 2026-11-06): 573 C# files (~8
 - Meta's budget for Quest 3: 400-600 draw calls for a medium scene ([Meta](https://developers.meta.com/vr/documentation/unreal/unreal-debug-android/)). Gothic worlds with thousands of objects need merging and instancing, which is our job.
 - No public Godot Quest benchmarks ([forum](https://forum.godotengine.org/t/quest-3-standalone-forward-mobile-or-compatibility-for-a-3d-vr-project-in-godot-4-6/136328)).
 - Measured on the Quest 3 (2026-11-07): GPU bound, 10 ms app GPU at 120 Hz when everything is drawn to the horizon; with an 80 m object distance and 40 m particle distance 71.5 FPS at 72 Hz, 90.7 at 90 Hz, 115.8 at 120 Hz, 240-360 draw calls. Alpha tested trees and per-emitter particle simulation are the big costs. See [[Work-Log]].
-- Status: **measured**, G1 Old Camp passes. Baseline: Gothic-Unity on Quest 3, G1 72 Hz avg 70.4 FPS, G2 120 Hz avg 98.8 FPS (2026-11-03). Still open: G2 Khorinis, Quest 2, occlusion culling.
+- With occlusion culling, 134 scripted NPCs and the ZenKitCS patch: 119.1 FPS at 120 Hz (minimum 111), app GPU 4.67 ms.
+- Status: **measured**, G1 Old Camp passes. Baseline: Gothic-Unity on Quest 3, G1 72 Hz avg 70.4 FPS, G2 120 Hz avg 98.8 FPS (2026-11-03). Still open: G2 Khorinis on the headset (desktop estimate ~6 ms GPU at 120 Hz), Quest 2.
 
 ### R3 - Occlusion culling
 - Gothic-Unity uses Unity's baked occlusion data per world (Umbra, shipped in a binary package). Godot has occluders (baked in the editor, or set at runtime as arrays) and culls on the CPU.
 - Our worlds load at runtime, so occluders must be built at runtime from the world mesh or pre-baked per world.
-- Status: **open**.
+- Measured on the Quest 3 (2026-11-07): occluders built at load from the world's big triangles (at least 2 m², per 64 m cell, ArrayOccluder3D): app GPU 6.85 -> 4.97 ms, draws 256-383 -> 20-131, CPU ~0.35 ms per frame for the culling.
+- Status: **measured** - runtime occluders work and pay off; no baking needed.
 
 ## Medium
 
@@ -47,17 +49,19 @@ How tied Gothic-Unity is to Unity today (split/14, 2026-11-06): 573 C# files (~8
 - Godot XR Tools is 100% GDScript, actively maintained (pickables, snap zones, teleport, climbing).
 - Godot core gives OpenXR, action maps, controllers and hand tracking.
 - Path: our own backend behind the `Gothic.VR.Interaction` ports (same move as HVR to XRI).
-- Status: **path**.
+- Spike (2026-11-07): own C# player (room scale, snap turn, teleport arc), grab hand (take, hold, throw items), dialog panel with pointing. Tested without a headset only.
+- Status: **path**, headset test open.
 
 ### R7 - Code sharing with Gothic-Unity
 - The team keeps developing in Unity. A port that can't take their work is dead after a few weeks.
-- Status: **open**, see [[Porting-Strategy]].
+- Spike (2026-11-07): 77 of Gothic-Unity's 188 core files compile unchanged in the Godot project through a small Unity shim; the dialog voices already use Gothic-Unity's own ADPCM decoder from it.
+- Status: **path**, see [[Porting-Strategy]].
 
 ## Low
 
 - **Physics**: Jolt is the default 3D physics since 4.6. Layer matrix maps to 32 collision layers and masks. The merged Old Camp world (979k triangles) builds as Jolt trimeshes in about a second. Status: **path**.
 - **Video**: Godot core plays only Theora, but Gothic-Unity has its own Bink decoder in C#. Only the texture upload changes. Status: **path**.
-- **Native libraries**: ZenKit (`libzenkitcapi`) and dmusic exist for linux-x64 and android-arm64; P/Invoke packaging on Android needs a test. Status: **open**.
-- **DXT textures**: Quest GPUs don't sample DXT in either engine; Gothic-Unity decompresses or transcodes already. Check Godot's fallback. Status: **open**.
-- **Audio**: dmusic music as a stream generator, Gothic sounds as WAV streams. Status: **open**.
+- **Native libraries**: ZenKit (`libzenkitcapi`) and dmusic exist for linux-x64 and android-arm64; P/Invoke packaging on Android needs a test. ZenKit runs on the Quest (gradle export puts the .so files into the APK). Two binding bugs found and patched in forks: ZenKitCS garbage per external call, dmusic-cs resolver delegate collected by the GC (see [[Upstream-Forks]]). dmusic on the Quest still untested. Status: **path**.
+- **DXT textures**: Quest GPUs don't sample DXT in either engine; Gothic-Unity decompresses or transcodes already. Check Godot's fallback. The spike decodes every texture to RGBA8 through ZenKit and builds one texture array; runs on the Quest. Compressed upload (ETC2/ASTC) would save memory later. Status: **path**.
+- **Audio**: dmusic music as a stream generator, Gothic sounds as WAV streams. Spike: dmusic renders on its own thread into an AudioStreamGenerator (18-24 ms per second on the desktop, no underruns), speech WAVs incl. IMA ADPCM play at the NPC. Status: **measured** (desktop), Quest open.
 - **Vendor risk**: MIT licence, Meta pays Godot XR contributors since 2024 ([vr.org](https://vr.org/articles/godot-46-xr-engine-meta-funding)), steady releases, Pico in the default action map.
