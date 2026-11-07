@@ -28,7 +28,7 @@ namespace GothicGodot.Spike
         private readonly Dictionary<string, ArrayMesh> _meshes = new(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, (Shape3D Shape, Vector3 Offset)> _shapes = new(StringComparer.OrdinalIgnoreCase);
         private const float _minItemThickness = 0.02f;
-        private readonly List<(IItem Vob, string Visual, Transform3D Transform)> _items = new();
+        private readonly List<(string Instance, string Visual, Transform3D Transform)> _items = new();
 
         /// <summary>Items (oCItem) are left out of the merged cells and collected for <see cref="BuildItems"/>.</summary>
         public bool SeparateItems { get; set; }
@@ -36,7 +36,7 @@ namespace GothicGodot.Spike
         /// <summary>Chests and doors (oCMobContainer, oCMobDoor with a model script) stay out of the cells for <see cref="Mobs"/>.</summary>
         public bool SeparateMobs { get; set; }
 
-        public List<(IInteractiveObject Vob, string Model, Transform3D Transform)> Mobs { get; } = new();
+        public List<WorldData.Mob> Mobs { get; } = new();
         public int ItemCount => _items.Count;
         public TextureArrayBuilder Textures => _textures;
         public int ItemsBuilt { get; private set; }
@@ -98,8 +98,14 @@ namespace GothicGodot.Spike
             });
         }
 
-        /// <summary>Only collects the items and mobs: the merged objects come from the world cache.</summary>
-        public void CollectSeparated(IEnumerable<IVirtualObject> roots) => ForEachMeshObject(roots, null);
+        /// <summary>The items and mobs kept out of the merged cells, from the world's data.</summary>
+        public void UseSeparated(WorldData data)
+        {
+            if (SeparateItems)
+                _items.AddRange(data.Items);
+            if (SeparateMobs)
+                Mobs.AddRange(data.Mobs);
+        }
 
         /// <summary>
         /// The collected items as single bodies the hands can take: frozen where Gothic put them (no physics cost)
@@ -110,12 +116,12 @@ namespace GothicGodot.Spike
         public void BuildItems(Node3D parent, Material opaque, Material alpha, Func<string, string> visualOf, float far,
             NearSpawner spawner = null, Vector3 start = default)
         {
-            foreach (var (vob, savedVisual, transform) in _items)
+            foreach (var (instance, savedVisual, transform) in _items)
             {
-                var visual = visualOf(vob.Instance) ?? savedVisual;
+                var visual = visualOf(instance) ?? savedVisual;
                 void Create()
                 {
-                    var item = CreateItem(vob.Instance, visual, transform, opaque, alpha, far);
+                    var item = CreateItem(instance, visual, transform, opaque, alpha, far);
                     if (item == null)
                         return;
                     parent.AddChild(item);
@@ -198,17 +204,11 @@ namespace GothicGodot.Spike
             void Walk(IVirtualObject vob)
             {
                 var visual = vob.Visual?.Name;
-                if (SeparateItems && vob is IItem item)
+                // Items and mobs are kept out of the cells (see UseSeparated).
+                if (SeparateItems && vob is IItem ||
+                    SeparateMobs && vob is IContainer or IDoor &&
+                    visual?.EndsWith(".MDS", StringComparison.OrdinalIgnoreCase) == true)
                 {
-                    // The visual comes from the item's script instance (C_ITEM.visual), resolved in BuildItems.
-                    _items.Add((item, visual,
-                        new Transform3D(ToGodot(vob.Rotation), WorldChunkBuilder.ToGodot(vob.Position))));
-                }
-                else if (SeparateMobs && vob is IContainer or IDoor &&
-                         visual?.EndsWith(".MDS", StringComparison.OrdinalIgnoreCase) == true)
-                {
-                    Mobs.Add(((IInteractiveObject)vob, System.IO.Path.GetFileNameWithoutExtension(visual).ToUpperInvariant(),
-                        new Transform3D(ToGodot(vob.Rotation), WorldChunkBuilder.ToGodot(vob.Position))));
                 }
                 else if (action != null && vob.ShowVisual && !string.IsNullOrEmpty(visual) && IsMeshVisual(visual))
                 {

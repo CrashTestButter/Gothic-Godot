@@ -25,7 +25,7 @@ namespace GothicGodot.Spike
         private static readonly string[] _keyOptions =
         {
             "vobs", "vob-mode", "items", "mobs", "object-far", "alpha-far", "compress-meshes",
-            "occluder-area", "collision", "skip"
+            "occluder-area", "collision", "skip", "interior-far"
         };
 
         private readonly string _prefix;
@@ -40,6 +40,7 @@ namespace GothicGodot.Spike
         public string Folder { get; }
         public string TexturesPath => Path.Combine(Folder, "textures.bin");
         private string ScenePath => Path.Combine(Folder, "world.scn");
+        private string DataPath => Path.Combine(Folder, "world-data.bin");
         private string LightPath => Path.Combine(Folder, "light.bin");
 
         // Written last: a cache without it was cut off (crash, quit) and is built again.
@@ -71,7 +72,7 @@ namespace GothicGodot.Spike
             _prefix = $"g{args.Game}-{Path.GetFileNameWithoutExtension(args.World).ToLowerInvariant()}-";
             Folder = Path.Combine(ProjectSettings.GlobalizePath(_root), _prefix + hash);
             IsHit = IsEnabled && mode != "rebuild" && File.Exists(InfoPath) && File.Exists(ScenePath) &&
-                    File.Exists(LightPath) && File.Exists(TexturesPath);
+                    File.Exists(LightPath) && File.Exists(TexturesPath) && File.Exists(DataPath);
         }
 
         /// <summary>Before a build that gets saved: an empty folder, older caches of this world deleted.</summary>
@@ -151,6 +152,11 @@ namespace GothicGodot.Spike
         }
 
         public void SaveLight(GroundLightSampler light) => light.Save(LightPath);
+
+        public void SaveData(WorldData data) => data.Save(DataPath);
+
+        /// <summary>The world's waynet and objects, read instead of the world file (null: from another format).</summary>
+        public WorldData LoadData() => WorldData.Load(DataPath);
 
         public void LoadLight(GroundLightSampler light) => light.Load(LightPath);
 

@@ -56,6 +56,24 @@ namespace GothicGodot.Spike
             var watch = Stopwatch.StartNew();
 
             var vfs = new Vfs();
+            // The world built on an earlier start: chunks, collision, occluders, ground light and texture layers. Read
+            // on worker threads while the archives are mounted and the rest is set up.
+            var cache = new WorldCache(_args);
+            var textures = new TextureArrayBuilder(vfs, _args.SliceSize);
+            var groundLight = new GroundLightSampler();
+            System.Threading.Tasks.Task cacheRead = null;
+            if (cache.IsHit)
+            {
+                cache.BeginLoadScene();
+                cacheRead = System.Threading.Tasks.Task.WhenAll(
+                    System.Threading.Tasks.Task.Run(() => textures.LoadCache(cache.TexturesPath)),
+                    System.Threading.Tasks.Task.Run(() => cache.LoadLight(groundLight)));
+            }
+            else if (cache.IsEnabled)
+                cache.Prepare();
+            if (cache.IsEnabled)
+                textures.CachePath = cache.TexturesPath;
+
             var dataPath = Path.Combine(_args.DataPath, "Data");
             foreach (var file in Directory.GetFiles(dataPath)
                          .Where(f => f.EndsWith(".vdf", StringComparison.OrdinalIgnoreCase)))
@@ -76,24 +94,29 @@ namespace GothicGodot.Spike
                 }
             }
 
-            var world = new ZenKit.World(vfs, _args.World, _args.IsGothic2 ? GameVersion.Gothic2 : GameVersion.Gothic1);
-            _start = GetCameraStart(world);
-            // Not Cache(): that copies the whole mesh incl. its light maps into managed memory (G2: ~4.5 GB peak).
-            var mesh = world.Mesh;
-            Log($"world {_args.World} loaded in {watch.ElapsedMilliseconds} ms: {mesh.PolygonCount} polygons, managed {GC.GetTotalMemory(false) / 1048576} MB");
-
-            // The world built on an earlier start: chunks, collision, occluders, ground light and texture layers.
-            var cache = new WorldCache(_args);
-            var textures = new TextureArrayBuilder(vfs, _args.SliceSize);
-            if (cache.IsHit)
+            // A cached start takes the world's waynet and objects from the cache: the world file isn't read at all.
+            var data = cache.IsHit ? cache.LoadData() : null;
+            ZenKit.World world = null;
+            ZenKit.IMesh mesh = null;
+            if (data == null)
             {
-                cache.BeginLoadScene();
-                textures.LoadCache(cache.TexturesPath);
+                world = new ZenKit.World(vfs, _args.World, _args.IsGothic2 ? GameVersion.Gothic2 : GameVersion.Gothic1);
+                // Not Cache(): that copies the whole mesh incl. its light maps into managed memory (G2: ~4.5 GB peak).
+                mesh = world.Mesh;
+                data = WorldData.Collect(world);
+                if (cache.IsEnabled)
+                    cache.SaveData(data);
+                Log($"world {_args.World} loaded in {watch.ElapsedMilliseconds} ms: {mesh.PolygonCount} polygons, managed {GC.GetTotalMemory(false) / 1048576} MB");
             }
-            else if (cache.IsEnabled)
-                cache.Prepare();
-            if (cache.IsEnabled)
-                textures.CachePath = cache.TexturesPath;
+            else
+            {
+                Log($"world data from the cache in {watch.ElapsedMilliseconds} ms: {data.Waypoints.Count} waypoints, " +
+                    $"{data.FreePoints.Count} freepoints, {data.Items.Count} items, {data.Mobs.Count} mobs, " +
+                    $"{data.Effects.Count} effects, {data.Sounds.Count} sounds");
+            }
+
+            _start = GetCameraStart(data);
+
             var materials = _materials = CreateMaterials();
             // Gothic's time of day: --hour to start, --time-speed (1 = Gothic's 100 minute day, 0 = stands still).
             _clock = new GameClock { Name = "Clock", Speed = _args.GetFloat("time-speed", 1f) };
@@ -102,25 +125,28 @@ namespace GothicGodot.Spike
             var worldRoot = new Node3D { Name = "World" };
             AddChild(worldRoot);
 
-            var groundLight = new GroundLightSampler();
             var builder = new WorldChunkBuilder(_args.CellSize)
             {
                 ObjectFarDistance = _args.GetFloat("object-far", 0f),
                 AlphaObjectFarDistance = _args.GetFloat("alpha-far", 0f),
+                InteriorFarDistance = _args.GetFloat("interior-far", 40f),
                 CompressAttributes = _args.Get("compress-meshes", "false") == "true",
-                OccluderMinArea = _args.GetFloat("occluder-area", 0f)
+                OccluderMinArea = _args.GetFloat("occluder-area", 0.5f)
             };
             if (builder.OccluderMinArea > 0)
                 GetViewport().UseOcclusionCulling = true;
             if (cache.IsHit)
             {
-                cache.LoadLight(groundLight);
-                Log($"world cache {cache.Folder}: {textures.LayerCount} texture layers read in {textures.CacheReadMs:F0} ms, " +
-                    $"ground light in {watch.ElapsedMilliseconds} ms");
+                var waitStarted = watch.ElapsedMilliseconds;
+                cacheRead.Wait();
+                Log($"world cache {cache.Folder}: {textures.LayerCount} texture layers read in {textures.CacheReadMs:F0} ms " +
+                    $"and the ground light beside the world file, waited {watch.ElapsedMilliseconds - waitStarted} ms for them");
             }
             else
             {
-                builder.AddWorld(mesh, WorldChunkBuilder.GetLeafPolygons(world.BspTree.Cache()), textures, groundLight);
+                var bsp = world.BspTree.Cache();
+                builder.AddWorld(mesh, WorldChunkBuilder.GetLeafPolygons(bsp), textures, groundLight,
+                    builder.InteriorFarDistance > 0 ? WorldChunkBuilder.GetSectorPolygons(bsp) : null);
                 // The cached ZenKit mesh is the biggest managed object graph (G2: several hundred MB); free it now.
                 mesh = null;
                 GC.Collect(2, GCCollectionMode.Forced, true, true);
@@ -145,14 +171,12 @@ namespace GothicGodot.Spike
                     AddChild(vobRoot);
                     vobs.BuildNodes(world.RootObjects, vobRoot, materials[3], materials[4]);
                 }
-                else if (cache.IsHit)
-                {
-                    vobs.CollectSeparated(world.RootObjects);
-                }
-                else
+                else if (!cache.IsHit)
                 {
                     vobs.BuildMerged(world.RootObjects, builder);
                 }
+
+                vobs.UseSeparated(data);
 
                 _vobs = vobs;
 
@@ -165,7 +189,7 @@ namespace GothicGodot.Spike
             }
 
             if (_args.Get("pfx", "true") == "true")
-                BuildParticles(vfs, world, watch);
+                BuildParticles(vfs, data, watch);
 
             // --npc-draws=split: each sub-mesh and the head drawn on their own (the merged way's comparison).
             ModelFactory.IsMergingSurfaces = _args.Get("npc-draws", "merged") != "split";
@@ -178,7 +202,7 @@ namespace GothicGodot.Spike
                     AnimationFar = _args.GetFloat("anim-far", 0f) };
                 AddChild(ai);
                 _ai = ai;
-                ai.Init(vfs, humans, world, groundLight, _args.GetInt("hour", 12), GetCameraStart(world),
+                ai.Init(vfs, humans, data, groundLight, _args.GetInt("hour", 12), _start,
                     _args.GetFloat("ai-radius", 150f),
                     _args.Get("startup", _args.IsGothic2 ? "STARTUP_NEWWORLD" : "STARTUP_OLDCAMP"), _args.DataPath);
                 Log($"AI NPCs spawned in {watch.ElapsedMilliseconds} ms: {ai.Count}");
@@ -189,7 +213,7 @@ namespace GothicGodot.Spike
                 var crowd = new HumanCrowd { Name = "Humans" };
                 AddChild(crowd);
                 _crowd = crowd;
-                crowd.Spawn(humans, world, npcCount, groundLight, _args.Get("bone-mode", "split"), _args.IsGothic2);
+                crowd.Spawn(humans, data, npcCount, groundLight, _args.Get("bone-mode", "split"), _args.IsGothic2);
                 Log($"humans spawned in {watch.ElapsedMilliseconds} ms: {crowd.Count}");
             }
 
@@ -238,10 +262,10 @@ namespace GothicGodot.Spike
 
             // --collision-near=<m>: only the collision this near the start goes in now, the rest a piece per frame
             // (0: all of it now).
-            var collisionNear = _args.GetFloat("collision-near", 60f);
+            var collisionNear = _args.GetFloat("collision-near", 40f);
             if (collisionNear > 0 && chunks.GetNodeOrNull<StaticBody3D>("WorldCollision") is { } collisionBody)
             {
-                var start = GetCameraStart(world);
+                var start = _start;
                 var streamer = new CollisionStreamer(collisionBody, start, collisionNear,
                     () => _camera != null ? _camera.GlobalPosition : start) { Name = "CollisionStreamer" };
                 AddChild(streamer);
@@ -256,6 +280,9 @@ namespace GothicGodot.Spike
                 Log($"collision: {counts.GetValueOrDefault("collision")} triangles");
             if (builder.OccluderMinArea > 0)
                 Log($"occluders: {counts.GetValueOrDefault("occluders")} triangles of at least {builder.OccluderMinArea} m²");
+            if (!cache.IsHit && builder.InteriorFarDistance > 0)
+                Log($"interiors: {builder.InteriorCount} rooms with meshes of their own, drawn up to " +
+                    $"{builder.InteriorFarDistance} m from their bounds");
             Log($"world nodes {(cache.IsHit ? "loaded" : "created")} in {watch.ElapsedMilliseconds} ms: " +
                 $"{counts.GetValueOrDefault("chunks")} chunks, {counts.GetValueOrDefault("triangles")} triangles, " +
                 $"{textures.LayerCount} texture layers, {textures.MissingCount} missing");
@@ -286,9 +313,9 @@ namespace GothicGodot.Spike
 
             CreateEnvironment();
             if (_args.Get("player", "false") == "true")
-                CreatePlayer(isXr, GetCameraStart(world));
+                CreatePlayer(isXr, _start);
             else
-                CreateRig(isXr, GetCameraStart(world));
+                CreateRig(isXr, _start);
             var spareCheck = _args.Get("spare-check", "");
             if (spareCheck != "" && _camera != null)
                 AddSpareCheck(textures, spareCheck);
@@ -303,17 +330,17 @@ namespace GothicGodot.Spike
 
             if (_args.Get("music", "true") == "true")
             {
-                var start = GetCameraStart(world);
+                var start = _start;
                 var music = _music = new GothicGodot.Audio.GothicMusic { Name = "Music" };
                 AddChild(music);
-                music.Init(vfs, world, () => _camera != null ? _camera.GlobalPosition : start, _args.GetInt("hour", 12),
+                music.Init(vfs, data, () => _camera != null ? _camera.GlobalPosition : start, _args.GetInt("hour", 12),
                     _args.GetFloat("music-volume", 0.33f));
                 Log($"music in {watch.ElapsedMilliseconds} ms");
             }
 
             if (_args.Get("sounds", "true") == "true")
             {
-                var start = GetCameraStart(world);
+                var start = _start;
                 var sfx = new GothicGodot.Audio.GothicSfx { Name = "Sfx" };
                 AddChild(sfx);
                 sfx.Init(vfs);
@@ -322,7 +349,7 @@ namespace GothicGodot.Spike
                 var sounds = new GothicGodot.Audio.WorldSounds { Name = "WorldSounds" };
                 AddChild(sounds);
                 if (_args.Get("world-sounds", "true") == "true")
-                    sounds.Init(sfx, world.RootObjects, () => _camera != null ? _camera.GlobalPosition : start,
+                    sounds.Init(sfx, data.Sounds, () => _camera != null ? _camera.GlobalPosition : start,
                         _args.GetInt("hour", 12));
                 Log($"sounds in {watch.ElapsedMilliseconds} ms: {sfx.Count} effects, {sounds.Count} sound objects");
             }
@@ -336,7 +363,11 @@ namespace GothicGodot.Spike
             var shots = _args.Get("shots", "");
             if (!string.IsNullOrEmpty(shots))
                 _shots = shots.Split(';', StringSplitOptions.RemoveEmptyEntries);
+            if (_bench != null)
+                _bench.LoadMs = watch.ElapsedMilliseconds;
         }
+
+        private Bench _bench;
 
         private bool _areChestsOpened;
 
@@ -527,8 +558,24 @@ namespace GothicGodot.Spike
             var root = new Node3D { Name = "Chests" };
             AddChild(root);
             var itemRoot = GetNode<Node3D>("Items");
-            foreach (var (vob, model, transform) in _vobs.Mobs)
+            // Made when the camera comes within 10 m of their 50 m draw distance (--mob-near=0: all now); their
+            // meshes and textures load now.
+            var near = _args.GetFloat("mob-near", 60f);
+            var start = _start;
+            NearSpawner spawner = null;
+            if (near > 0)
             {
+                spawner = new NearSpawner("chests and doors", () => _camera != null ? _camera.GlobalPosition : start,
+                    near, 4) { Name = "MobSpawner" };
+                AddChild(spawner);
+            }
+
+            var chestCount = 0;
+            var doorCount = 0;
+            var lockedCount = 0;
+            foreach (var mob in _vobs.Mobs)
+            {
+                var (model, transform) = (mob.Model, mob.Transform);
                 if (!factories.TryGetValue(model, out var factory))
                 {
                     try
@@ -543,40 +590,50 @@ namespace GothicGodot.Spike
                     factories[model] = factory;
                 }
 
-                if (factory == null)
+                if (factory == null ||
+                    (factory.GetSkinnedMesh($"{factory.Model}.MDM") ?? factory.GetSkinnedMesh($"{factory.Model}.MDL")) == null)
                     continue;
-                var chest = new GothicGodot.Interaction.WorldMob
+                var (key, pick, contents) = (mob.Key, mob.PickString, mob.Contents ?? "");
+                var isLocked = mob.IsLocked && (!string.IsNullOrEmpty(key) || !string.IsNullOrEmpty(pick));
+                var isDoor = mob.IsDoor;
+                var name = $"{(string.IsNullOrEmpty(mob.Name) ? model : mob.Name)}_{chestCount + doorCount}";
+                var light = _vobs.LightAt(transform.Origin);
+                void Create()
                 {
-                    Name = $"{(string.IsNullOrEmpty(vob.Name) ? model : vob.Name)}_{_chests.Count}"
-                };
-                root.AddChild(chest);
-                chest.Transform = transform;
-                var (isLockedFlag, key, pick, contents) = vob switch
-                {
-                    ZenKit.Vobs.IContainer c => (c.IsLocked, c.Key, c.PickString, c.Contents ?? ""),
-                    ZenKit.Vobs.IDoor d => (d.IsLocked, d.Key, d.PickString, ""),
-                    _ => (false, null, null, "")
-                };
-                var isLocked = isLockedFlag && (!string.IsNullOrEmpty(key) || !string.IsNullOrEmpty(pick));
-                if (!chest.Setup(factory, contents, isLocked, _vobs.LightAt(transform.Origin), CreateItem, itemRoot,
-                        vob is ZenKit.Vobs.IDoor, key, pick))
-                {
-                    chest.QueueFree();
-                    continue;
+                    var chest = new GothicGodot.Interaction.WorldMob { Name = name };
+                    root.AddChild(chest);
+                    chest.Transform = transform;
+                    if (!chest.Setup(factory, contents, isLocked, light, CreateItem, itemRoot, isDoor, key, pick))
+                    {
+                        chest.QueueFree();
+                        return;
+                    }
+
+                    _chests.Add(chest);
                 }
 
-                _chests.Add(chest);
+                if (isDoor)
+                    doorCount++;
+                else
+                    chestCount++;
+                if (isLocked)
+                    lockedCount++;
+                if (spawner != null)
+                    spawner.Add(transform.Origin, start, Create);
+                else
+                    Create();
                 if (isPreloading)
                     foreach (var entry in Gothic.Core.Extensions.ContentItemExtension.UnpackItems(contents))
                         _vobs.Preload(ItemInfo(entry.Name.Trim())?.Visual);
             }
 
+            // Every NPC's, also those out of range now.
             if (_ai != null && isPreloading)
-                foreach (var npc in _ai.Npcs.Append(_ai.Hero))
+                foreach (var npc in _ai.Inserted.Append(_ai.Hero))
                     foreach (var instance in npc.Inventory.Items)
                         _vobs.Preload(ItemInfo(instance)?.Visual);
-            Log($"chests and doors built in {watch.ElapsedMilliseconds} ms: {_chests.Count(c => !c.IsDoor)} chests, " +
-                $"{_chests.Count(c => c.IsDoor)} doors of {_vobs.Mobs.Count} ({_chests.Count(c => c.IsLocked)} locked)");
+            Log($"chests and doors built in {watch.ElapsedMilliseconds} ms: {chestCount} chests, {doorCount} doors of " +
+                $"{_vobs.Mobs.Count} ({lockedCount} locked)" + (spawner != null ? $", {spawner}" : ""));
         }
 
         public IReadOnlyList<GothicGodot.Interaction.WorldMob> Chests => _chests;
@@ -587,7 +644,7 @@ namespace GothicGodot.Spike
         /// <summary>A new item body by instance name, e.g. taken out of the inventory (not yet in the tree).</summary>
         public Func<string, Transform3D, GothicGodot.Interaction.WorldItem> CreateItem { get; private set; }
 
-        private void BuildParticles(Vfs vfs, ZenKit.World world, Stopwatch watch)
+        private void BuildParticles(Vfs vfs, WorldData data, Stopwatch watch)
         {
             var root = new Node3D { Name = "Particles" };
             AddChild(root);
@@ -604,24 +661,13 @@ namespace GothicGodot.Spike
                 AddChild(spawner);
             }
 
-            void Walk(ZenKit.Vobs.IVirtualObject vob)
+            foreach (var (visual, transform) in data.Effects)
             {
-                var visual = vob.Visual?.Name;
-                if (vob.ShowVisual && visual != null && visual.EndsWith(".PFX", StringComparison.OrdinalIgnoreCase))
-                {
-                    var transform = new Transform3D(VobBuilder.ToGodot(vob.Rotation), MeshPart.ToGodot(vob.Position));
-                    if (spawner == null)
-                        pfx.Add(visual, transform, root);
-                    else if (pfx.Prepare(visual))
-                        spawner.Add(transform.Origin, start, () => pfx.Add(visual, transform, root));
-                }
-
-                foreach (var child in vob.Children)
-                    Walk(child);
+                if (spawner == null)
+                    pfx.Add(visual, transform, root);
+                else if (pfx.Prepare(visual))
+                    spawner.Add(transform.Origin, start, () => pfx.Add(visual, transform, root));
             }
-
-            foreach (var vob in world.RootObjects)
-                Walk(vob);
 
             if (far > 0)
                 AddChild(new PfxCuller(pfx.Emitters, far));
@@ -859,33 +905,33 @@ namespace GothicGodot.Spike
                 .ToArray();
         }
 
-        private Vector3 GetCameraStart(ZenKit.World world)
+        private Vector3 GetCameraStart(WorldData world)
         {
             var waypoint = _args.Get("waypoint", "");
             if (!string.IsNullOrEmpty(waypoint))
             {
-                var point = world.WayNet.Points.FirstOrDefault(p => p.Name.Equals(waypoint, StringComparison.OrdinalIgnoreCase));
-                if (point != null)
-                    return WorldChunkBuilder.ToGodot(point.Position);
+                var point = world.Waypoints.FirstOrDefault(p => p.Name.Equals(waypoint, StringComparison.OrdinalIgnoreCase));
+                if (point.Name != null)
+                    return point.Position;
             }
 
             return _args.IsGothic2 ? GetCenter(world, "NW_CITY_") : GetOldCampCenter(world);
         }
 
-        private static Vector3 GetCenter(ZenKit.World world, string prefix)
+        private static Vector3 GetCenter(WorldData world, string prefix)
         {
-            var points = world.WayNet.Points
+            var points = world.Waypoints
                 .Where(p => p.Name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-                .Select(p => MeshPart.ToGodot(p.Position))
+                .Select(p => p.Position)
                 .ToList();
             return points.Count == 0 ? Vector3.Zero : points.Aggregate(Vector3.Zero, (sum, p) => sum + p) / points.Count;
         }
 
-        private static Vector3 GetOldCampCenter(ZenKit.World world)
+        private static Vector3 GetOldCampCenter(WorldData world)
         {
-            var ring = world.WayNet.Points
+            var ring = world.Waypoints
                 .Where(p => p.Name.StartsWith("OC_ROUND_", StringComparison.OrdinalIgnoreCase))
-                .Select(p => WorldChunkBuilder.ToGodot(p.Position))
+                .Select(p => p.Position)
                 .ToList();
             if (ring.Count == 0)
                 return Vector3.Zero;
@@ -993,6 +1039,17 @@ namespace GothicGodot.Spike
                     var lockTest = new GothicGodot.Interaction.LockTest { Name = "LockTest" };
                     AddChild(lockTest);
                     lockTest.Init(player, _chests, opener, locks, bag, _args.Screenshot);
+                }
+                // --bench=true: 12 waypoints within 250 m of the start (by name, evenly spread), four directions each.
+                if (_args.Get("bench", "false") == "true" && _ai != null)
+                {
+                    var near = _ai.Waypoints.Where(w => w.Value.DistanceTo(_start) < 250f)
+                        .OrderBy(w => w.Key, StringComparer.OrdinalIgnoreCase).Select(w => w.Value).ToList();
+                    var count = Math.Min(12, near.Count);
+                    _bench = new Bench { Name = "Bench" };
+                    AddChild(_bench);
+                    _bench.Init(player, Enumerable.Range(0, count).Select(i => near[i * near.Count / count]),
+                        _args.Get("bench-shots", ""));
                 }
                 if (_args.Get("presence-test", "false") == "true" && _ai != null)
                 {

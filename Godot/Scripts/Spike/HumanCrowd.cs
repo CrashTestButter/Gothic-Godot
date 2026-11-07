@@ -50,14 +50,14 @@ namespace GothicGodot.Spike
             return npc?.Root.GlobalTransform;
         }
 
-        public void Spawn(ModelFactory factory, ZenKit.World world, int count, GroundLightSampler light, string boneMode,
+        public void Spawn(ModelFactory factory, WorldData world, int count, GroundLightSampler light, string boneMode,
             bool isGothic2 = false)
         {
             var guardArmors = isGothic2 ? _g2GuardArmors : _guardArmors;
             var campArmors = isGothic2 ? _g2TownArmors : _campArmors;
             _boneMode = boneMode;
             var random = new Random(7);
-            var points = world.WayNet.Points
+            var points = world.Waypoints
                 .Where(p => isGothic2
                     ? p.Name.StartsWith("NW_CITY_")
                     : p.Name.StartsWith("OCR_") || p.Name.StartsWith("OCC_") || p.Name.StartsWith("OC_"))
@@ -76,8 +76,8 @@ namespace GothicGodot.Spike
 
                 var root = new Node3D { Name = point.Name };
                 AddChild(root);
-                var direction = MeshPart.ToGodot(point.Direction) * 100f;
-                root.GlobalPosition = MeshPart.ToGodot(point.Position);
+                var direction = point.Direction * 100f;
+                root.GlobalPosition = point.Position;
                 if (new Vector2(direction.X, direction.Z).Length() > 0.01f)
                     root.Rotation = new Vector3(0, Mathf.Atan2(-direction.X, -direction.Z), 0);
 

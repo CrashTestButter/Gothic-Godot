@@ -39,6 +39,8 @@ namespace GothicGodot.Interaction
             switch (_step)
             {
                 case 0 when _time > 2:
+                    // Chests and doors further away are made when the camera comes near; the test may pick one.
+                    GothicGodot.Spike.NearSpawner.MakeNear(_player.GlobalPosition, 1000f);
                     var spot = Vector3.Zero;
                     _door = _mobs.Where(m => m.IsDoor && !m.IsLocked)
                         .OrderBy(m => m.Centre.DistanceSquaredTo(_player.GlobalPosition))

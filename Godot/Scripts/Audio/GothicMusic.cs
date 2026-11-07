@@ -31,7 +31,7 @@ namespace GothicGodot.Audio
         private readonly Dictionary<string, MusicThemeInstance> _themes = new(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, Segment> _segments = new(StringComparer.OrdinalIgnoreCase);
         private readonly HashSet<string> _brokenSegments = new(StringComparer.OrdinalIgnoreCase);
-        private readonly List<(IZoneMusic Zone, Aabb Box)> _zones = new();
+        private readonly List<(string Zone, Aabb Box)> _zones = new();
         private readonly float[] _pcm = new float[_chunkFrames * 2];
         private readonly Vector2[] _frames = new Vector2[_chunkFrames];
         private readonly Stopwatch _renderWatch = new();
@@ -46,8 +46,8 @@ namespace GothicGodot.Audio
         private Performance _performance;
         private AudioStreamPlayer _player;
         private AudioStreamGeneratorPlayback _playback;
-        private IZoneMusic _defaultZone;
-        private IZoneMusic _currentZone;
+        private string _defaultZone;
+        private string _currentZone;
         private MusicThemeInstance _currentTheme;
         private Func<Vector3> _listener;
         private bool _isNight;
@@ -56,11 +56,11 @@ namespace GothicGodot.Audio
         private double _logTime;
 
         public string CurrentTheme => _currentTheme?.File;
-        public string CurrentZone => _currentZone?.Name ?? _defaultZone?.Name;
+        public string CurrentZone => _currentZone ?? _defaultZone;
 
         /// <param name="listener">Where the hero is (the camera or the player's feet).</param>
         /// <param name="hour">Day from 4:00 to 21:00 like Gothic-Unity, else night.</param>
-        public void Init(Vfs vfs, ZenKit.World world, Func<Vector3> listener, int hour, float volume)
+        public void Init(Vfs vfs, Spike.WorldData world, Func<Vector3> listener, int hour, float volume)
         {
             _vfs = vfs;
             _listener = listener;
@@ -70,8 +70,8 @@ namespace GothicGodot.Audio
             foreach (var symbol in vm.GetInstanceSymbols("C_MUSICTHEME"))
                 _themes[symbol.Name] = vm.InitInstance<MusicThemeInstance>(symbol);
 
-            foreach (var vob in world.RootObjects)
-                CollectZones(vob);
+            _zones.AddRange(world.MusicZones);
+            _defaultZone = world.DefaultMusicZone;
 
             // No LoaderOptions.Download: dmusic's own download error path double-frees the segment (Gothic-Unity
             // finding); Segment.Download is called by hand where a failure is a managed exception.
@@ -93,34 +93,11 @@ namespace GothicGodot.Audio
             _isRunning = true;
             _thread = new Thread(RenderLoop) { Name = "GothicMusic", IsBackground = true };
             _thread.Start();
-            GD.Print($"[Music] {_themes.Count} themes, {_zones.Count} zones, default {_defaultZone?.Name ?? "-"}, " +
+            GD.Print($"[Music] {_themes.Count} themes, {_zones.Count} zones, default {_defaultZone ?? "-"}, " +
                      $"{(_isNight ? "night" : "day")}");
             if (OS.IsStdOutVerbose() || OS.GetCmdlineUserArgs().Contains("--music-zones"))
-                GD.Print("[Music] zones: " + string.Join(", ", _zones.Select(z => $"{z.Zone.Name} {z.Box.GetCenter():F0}")));
+                GD.Print("[Music] zones: " + string.Join(", ", _zones.Select(z => $"{z.Zone} {z.Box.GetCenter():F0}")));
             Play();
-        }
-
-        private void CollectZones(IVirtualObject vob)
-        {
-            if (vob is IZoneMusic zone)
-            {
-                if (vob is IZoneMusicDefault)
-                    _defaultZone = zone;
-                else
-                    _zones.Add((zone, ToGodot(zone.BoundingBox)));
-            }
-
-            foreach (var child in vob.Children)
-                CollectZones(child);
-        }
-
-        private static Aabb ToGodot(AxisAlignedBoundingBox box)
-        {
-            var a = MeshPart.ToGodot(box.Min);
-            var b = MeshPart.ToGodot(box.Max);
-            var min = new Vector3(Mathf.Min(a.X, b.X), Mathf.Min(a.Y, b.Y), Mathf.Min(a.Z, b.Z));
-            var max = new Vector3(Mathf.Max(a.X, b.X), Mathf.Max(a.Y, b.Y), Mathf.Max(a.Z, b.Z));
-            return new Aabb(min, max - min);
         }
 
         public override void _Process(double delta)
@@ -135,7 +112,7 @@ namespace GothicGodot.Audio
                 var zone = FindZone(_listener());
                 if (zone != _currentZone)
                 {
-                    GD.Print($"[Music] zone {_currentZone?.Name ?? "-"} -> {zone?.Name ?? _defaultZone?.Name ?? "-"}");
+                    GD.Print($"[Music] zone {_currentZone ?? "-"} -> {zone ?? _defaultZone ?? "-"}");
                     _currentZone = zone;
                     Play();
                 }
@@ -223,12 +200,12 @@ namespace GothicGodot.Audio
             Play();
         }
 
-        private IZoneMusic FindZone(Vector3 position)
+        private string FindZone(Vector3 position)
         {
             if (_currentZone != null && _zones.Any(z => z.Zone == _currentZone && z.Box.HasPoint(position)))
                 return _currentZone;
 
-            IZoneMusic found = null;
+            string found = null;
             foreach (var (zone, box) in _zones)
                 if (box.HasPoint(position))
                     found = zone;
@@ -242,7 +219,7 @@ namespace GothicGodot.Audio
             foreach (var zone in new[] { _currentZone, _defaultZone }.Where(z => z != null))
             {
                 // OLDCAMP_OC -> OC
-                var name = zone.Name[(zone.Name.IndexOf('_') + 1)..];
+                var name = zone[(zone.IndexOf('_') + 1)..];
                 foreach (var time in timeTags)
                 {
                     if (!_themes.TryGetValue($"{name}_{time}_STD", out var theme))
