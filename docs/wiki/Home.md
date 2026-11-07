@@ -13,6 +13,7 @@ The goal stays the same as in Gothic-Unity: Gothic 1 and 2 smooth and native on 
 - [[Porting-Strategy]] - how the 88k lines of C# move, and how we stay in sync with Gothic-Unity
 - [[Upstream-Forks]] - Godot, XR Tools and other projects we patch, and what we send back
 - [[Toolchain]] - how to build, run and deploy to the Quest
+- [[Headset-Test]] - what to check and measure on the Quest once it is connected
 - [[Work-Log]] - what was done, measured and decided, newest first
 
 ## Repository layout
