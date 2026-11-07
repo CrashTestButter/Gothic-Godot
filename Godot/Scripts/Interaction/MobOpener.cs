@@ -17,11 +17,13 @@ namespace GothicGodot.Interaction
         private GothicPlayer _player;
         private IReadOnlyList<WorldMob> _chests;
         private Func<bool> _isAllowed;
+        private LockPicking _locks;
         private readonly bool[] _wasGripDown = new bool[2];
         private bool _wasKeyDown;
 
-        public void Init(GothicPlayer player, IReadOnlyList<WorldMob> chests, Func<bool> isAllowed)
+        public void Init(GothicPlayer player, IReadOnlyList<WorldMob> chests, Func<bool> isAllowed, LockPicking locks = null)
         {
+            _locks = locks;
             _player = player;
             _chests = chests;
             _isAllowed = isAllowed;
@@ -29,7 +31,7 @@ namespace GothicGodot.Interaction
 
         public override void _PhysicsProcess(double delta)
         {
-            if (_player == null || !_player.IsPlaced || _isAllowed?.Invoke() == false)
+            if (_player == null || !_player.IsPlaced || _isAllowed?.Invoke() == false || _locks?.IsPicking == true)
                 return;
 
             if (_player.IsXr)
@@ -40,8 +42,8 @@ namespace GothicGodot.Interaction
             }
 
             var isDown = Input.IsKeyPressed(Key.F);
-            if (isDown && !_wasKeyDown)
-                FindInView()?.Toggle();
+            if (isDown && !_wasKeyDown && FindInView() is { } mob)
+                Use(mob);
             _wasKeyDown = isDown;
         }
 
@@ -69,7 +71,16 @@ namespace GothicGodot.Interaction
                 best = distance;
             }
 
-            nearest?.Toggle();
+            if (nearest != null)
+                Use(nearest);
+        }
+
+        /// <summary>Opens or closes it; a locked one first needs its key or its lock picked.</summary>
+        public void Use(WorldMob mob)
+        {
+            if (mob.IsLocked && (_locks == null || _locks.Try(mob) != LockPicking.Result.Unlocked))
+                return;
+            mob.Toggle();
         }
 
         /// <summary>The nearest chest in front of the eyes (within about 40° of the view).</summary>

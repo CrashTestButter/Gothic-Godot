@@ -59,6 +59,8 @@ namespace GothicGodot.Spike
         public string SpawnWaypoint;
         public readonly List<RoutineEntry> Routine = new();
         public readonly Interaction.Inventory Inventory = new();
+        public readonly Dictionary<int, int> TalentValues = new();
+        public readonly Dictionary<int, int> TalentSkills = new();
 
         public ModelFactory Factory;
         public string IdleClip = "S_RUN";

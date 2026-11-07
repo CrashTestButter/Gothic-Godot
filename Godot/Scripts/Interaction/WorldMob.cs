@@ -33,6 +33,19 @@ namespace GothicGodot.Interaction
         public bool HasContents => !string.IsNullOrWhiteSpace(_contents);
         public bool IsDoor { get; private set; }
 
+        /// <summary>The key item that opens it (instance name), if any.</summary>
+        public string Key { get; private set; }
+
+        /// <summary>The lock combination for a lock pick, e.g. "LRRL" (left, right turns).</summary>
+        public string PickString { get; private set; }
+
+        /// <summary>Opened with the key or the right turns: stays unlocked.</summary>
+        public void Unlock()
+        {
+            IsLocked = false;
+            GD.Print($"[Mob] {Name} unlocked");
+        }
+
         /// <summary>The nearest point of the closed mob's box (a hand on a door or a lid).</summary>
         public Vector3 ClosestPoint(Vector3 position)
         {
@@ -50,8 +63,11 @@ namespace GothicGodot.Interaction
         public Vector3 Centre => GlobalTransform * _bounds.GetCenter();
 
         public bool Setup(ModelFactory factory, string contents, bool isLocked, Color tint,
-            Func<string, Transform3D, WorldItem> createItem, Node3D itemParent, bool isDoor = false)
+            Func<string, Transform3D, WorldItem> createItem, Node3D itemParent, bool isDoor = false, string key = null,
+            string pickString = null)
         {
+            Key = key;
+            PickString = pickString?.Trim().ToUpperInvariant();
             IsDoor = isDoor;
             _factory = factory;
             _contents = contents;

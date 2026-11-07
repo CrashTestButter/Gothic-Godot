@@ -2,6 +2,13 @@
 
 Newest first.
 
+## 2026-11-07 - Keys and lock picks
+
+- Locked chests and doors with Gothic's rules (like Gothic-Unity's lock picking, from OpenGothic): the key item in the bag opens at once; else the lock combination (e.g. LLRR) is turned with a lock pick - G1 everybody, G2 only with the lock picking talent (else the scripts' PLAYER_MOB_MISSING_LOCKPICK). A wrong turn starts over and may break the pick: G1 by the talent's value (90 untrained), G2 by dexterity. Every turn calls the scripts' G_PickLock(success, brokenOpen).
+- Turns: arrow keys (desktop) or the right stick left / right (XR); Escape or B stops; walking away stops. A small tag shows the right turns so far (Gothic clicks), not how many are left.
+- Talent externals (Npc_Set/GetTalentValue, Npc_Set/GetTalentSkill) keep the scripts' values per NPC.
+- `--lock-test=true`: gives lock picks, picks the nearest locked chest with one wrong turn first. G1: LLRR, one pick broke, open, 5 entries inside. G2 (talent taught by the test): LRRLR, open, a ring and 20 gold inside.
+
 ## 2026-11-07 - Doors
 
 - Doors (oCMobDoor) are animated mobs like the chests (one class for both now): closed S_S0, opening T_S0_2_S1, open S_S1. A closed door's box blocks the player; it lets him through as soon as it starts to open and blocks again when it starts to close.

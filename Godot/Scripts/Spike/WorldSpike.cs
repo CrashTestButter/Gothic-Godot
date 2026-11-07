@@ -338,7 +338,7 @@ namespace GothicGodot.Spike
                 };
                 var isLocked = isLockedFlag && (!string.IsNullOrEmpty(key) || !string.IsNullOrEmpty(pick));
                 if (!chest.Setup(factory, contents, isLocked, _vobs.LightAt(transform.Origin), CreateItem, itemRoot,
-                        vob is ZenKit.Vobs.IDoor))
+                        vob is ZenKit.Vobs.IDoor, key, pick))
                 {
                     chest.QueueFree();
                     continue;
@@ -719,9 +719,23 @@ namespace GothicGodot.Spike
 
             if (_chests.Count > 0)
             {
+                GothicGodot.Interaction.LockPicking locks = null;
+                if (bag != null)
+                {
+                    locks = new GothicGodot.Interaction.LockPicking { Name = "LockPicking" };
+                    AddChild(locks);
+                    locks.Init(player, _ai, bag.Inventory, _args.IsGothic2);
+                }
+
                 var opener = new GothicGodot.Interaction.MobOpener { Name = "MobOpener" };
                 AddChild(opener);
-                opener.Init(player, _chests, () => _ai?.Dialog?.IsActive != true && dialogPanel?.HasTarget != true);
+                opener.Init(player, _chests, () => _ai?.Dialog?.IsActive != true && dialogPanel?.HasTarget != true, locks);
+                if (_args.Get("lock-test", "false") == "true")
+                {
+                    var lockTest = new GothicGodot.Interaction.LockTest { Name = "LockTest" };
+                    AddChild(lockTest);
+                    lockTest.Init(player, _chests, opener, locks, bag, _args.Screenshot);
+                }
                 if (_args.Get("door-test", "false") == "true")
                 {
                     var doorTest = new GothicGodot.Interaction.DoorTest { Name = "DoorTest" };

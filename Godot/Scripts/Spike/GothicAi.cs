@@ -733,6 +733,42 @@ namespace GothicGodot.Spike
         private int _heroChangesLogged;
         private string _currentCall;
 
+        /// <summary>A script constant (e.g. NPC_TALENT_PICKLOCK), or the fallback if the scripts have none.</summary>
+        public int GetConstant(string name, int fallback) => _vm.GetSymbolByName(name)?.GetInt(0, null) ?? fallback;
+
+        /// <summary>
+        /// Calls a script function with self = the hero (G_PickLock(success, brokenOpen) etc.); false if the scripts
+        /// have none - calling an external would crash the VM.
+        /// </summary>
+        public bool CallAsHero(string function, params int[] args)
+        {
+            var symbol = _vm.GetSymbolByName(function);
+            if (symbol is not { Type: DaedalusDataType.Function, IsExternal: false } || _hero?.Instance == null)
+                return false;
+            var self = _vm.GlobalSelf;
+            _vm.GlobalSelf = _hero.Instance;
+            try
+            {
+                switch (args.Length)
+                {
+                    case 0: _vm.Call(symbol.Index); break;
+                    case 1: _vm.Call(symbol.Index, args[0]); break;
+                    default: _vm.Call(symbol.Index, args[0], args[1]); break;
+                }
+
+                return true;
+            }
+            catch (Exception e)
+            {
+                GD.PushWarning($"[Ai] {function} failed: {e.Message}");
+                return false;
+            }
+            finally
+            {
+                _vm.GlobalSelf = self;
+            }
+        }
+
         public bool HasClip(string name) => _factory.GetClip(name.ToUpperInvariant()) != null;
 
         public bool PlayClip(GothicNpc npc, string name, bool isLooping)
@@ -918,6 +954,30 @@ namespace GothicGodot.Spike
                     GD.Print($"[Ai] hero attribute {(NpcAttribute)attribute} {value:+#;-#;0} -> {newValue} in {_currentCall ?? "-"}");
                 npc.SetAttribute((NpcAttribute)attribute, newValue);
             }));
+            // Talents (lock picking, weapons): value = G1's chance to break a lock pick etc., skill = the level.
+            _vm.RegisterExternal("Npc_SetTalentValue", (DaedalusVm.ExternalFuncV<NpcInstance, int, int>)((npc, talent, value) =>
+            {
+                _externals++;
+                if (Npc(npc) is { } target)
+                    target.TalentValues[talent] = value;
+            }));
+            _vm.RegisterExternal("Npc_SetTalentSkill", (DaedalusVm.ExternalFuncV<NpcInstance, int, int>)((npc, talent, skill) =>
+            {
+                _externals++;
+                if (Npc(npc) is { } target)
+                    target.TalentSkills[talent] = skill;
+            }));
+            _vm.RegisterExternal("Npc_GetTalentValue", (DaedalusVm.ExternalFunc<int, NpcInstance, int>)((npc, talent) =>
+            {
+                _externals++;
+                return Npc(npc)?.TalentValues.GetValueOrDefault(talent) ?? 0;
+            }));
+            _vm.RegisterExternal("Npc_GetTalentSkill", (DaedalusVm.ExternalFunc<int, NpcInstance, int>)((npc, talent) =>
+            {
+                _externals++;
+                return Npc(npc)?.TalentSkills.GetValueOrDefault(talent) ?? 0;
+            }));
+
             // Inventories (Gothic-Unity's VmExternalDomain signatures): scripts fill them on insert and in dialogs.
             _vm.RegisterExternal("CreateInvItem", (DaedalusVm.ExternalFuncV<NpcInstance, int>)((npc, item) =>
             {
