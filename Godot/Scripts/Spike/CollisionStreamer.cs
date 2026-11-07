@@ -9,6 +9,10 @@ namespace GothicGodot.Spike
     /// camera first: Jolt builds a mesh shape when it enters the scene (G2: 878k triangles, 0.65 s of the desktop's
     /// cached load). Nobody needs collision far away in the first seconds - the player walks, items lie frozen.
     /// Pieces near the camera (after a teleport) go in at once, whatever the budget.
+    ///
+    /// Late pieces go straight to the physics server, a static body each (adding to the big body would rebuild its
+    /// compound shape of all pieces each time; a node per piece cost more than the piece). Ray queries report the
+    /// world's collision body as their collider, like for the pieces in it.
     /// </summary>
     public partial class CollisionStreamer : Node
     {
@@ -17,19 +21,31 @@ namespace GothicGodot.Spike
 
         private const double _sortInterval = 1.0;
         private const float _urgent = 30f;
+        // The near check runs again once the camera moved this far.
+        private const float _recheckDistance = 2f;
 
-        private readonly List<(CollisionShape3D Shape, Aabb Bounds, int Triangles)> _pending = new();
+        private class Piece
+        {
+            public Shape3D Shape;
+            public Aabb Bounds;
+            public int Triangles;
+            public float Distance;
+        }
+
+        private static CollisionStreamer _instance;
+
+        private readonly List<Piece> _pending = new();
+        private readonly List<(Rid Body, Shape3D Shape)> _added = new();
         private readonly Func<Vector3> _eye;
-        private readonly StaticBody3D _source;
-        private Node3D _target;
+        private readonly uint _layer;
+        private readonly uint _mask;
+        private readonly ulong _collider;
+        private Vector3 _lastCheck = new(float.MaxValue, 0, 0);
         private double _sortTime = double.MaxValue;
         private double _seconds;
-        private int _added;
         private int _urgentAdded;
         private double _addMs;
         private double _maxAddMs;
-
-        private static CollisionStreamer _instance;
 
         public int PendingCount => _pending.Count;
         public int PendingTriangles { get; private set; }
@@ -41,8 +57,10 @@ namespace GothicGodot.Spike
         /// <summary>Takes the pieces further than <paramref name="near"/> out of the body, before it enters the scene.</summary>
         public CollisionStreamer(StaticBody3D body, Vector3 start, float near, Func<Vector3> eye)
         {
-            _source = body;
             _eye = eye;
+            _layer = body.CollisionLayer;
+            _mask = body.CollisionMask;
+            _collider = body.GetInstanceId();
             foreach (var child in body.GetChildren())
             {
                 if (child is not CollisionShape3D shape || !shape.HasMeta(BoundsMeta))
@@ -50,10 +68,11 @@ namespace GothicGodot.Spike
                 var bounds = shape.GetMeta(BoundsMeta).AsAabb();
                 if (Distance(bounds, start) <= near)
                     continue;
-                body.RemoveChild(shape);
                 var triangles = shape.GetMeta(TrianglesMeta).AsInt32();
-                _pending.Add((shape, bounds, triangles));
+                _pending.Add(new Piece { Shape = shape.Shape, Bounds = bounds, Triangles = triangles });
                 PendingTriangles += triangles;
+                body.RemoveChild(shape);
+                shape.Free();
             }
         }
 
@@ -63,6 +82,9 @@ namespace GothicGodot.Spike
         {
             if (_instance == this)
                 _instance = null;
+            foreach (var (body, _) in _added)
+                PhysicsServer3D.FreeRid(body);
+            _added.Clear();
         }
 
         /// <summary>
@@ -86,21 +108,19 @@ namespace GothicGodot.Spike
         {
             if (_pending.Count == 0)
             {
-                GD.Print($"[Collision] all of the world's collision in after {_seconds:F1} s ({_added} pieces, " +
-                         $"{_urgentAdded} of them at once near the camera; {_addMs / Math.Max(1, _added):F2} ms a " +
-                         $"piece, at most {_maxAddMs:F2} ms)");
-                QueueFree();
+                GD.Print($"[Collision] all of the world's collision in after {_seconds:F1} s ({_added.Count} pieces, " +
+                         $"{_urgentAdded} of them at once near the camera; {_addMs / Math.Max(1, _added.Count):F2} ms a " +
+                         $"piece, at most {_maxAddMs:F2} ms after the first)");
+                SetProcess(false);
                 return;
             }
 
             _seconds += delta;
             var eye = _eye();
-            for (var i = _pending.Count - 1; i >= 0; i--)
+            if (eye.DistanceSquaredTo(_lastCheck) > _recheckDistance * _recheckDistance)
             {
-                if (Distance(_pending[i].Bounds, eye) > _urgent)
-                    continue;
-                Add(i);
-                _urgentAdded++;
+                _lastCheck = eye;
+                LoadNear(eye);
             }
 
             _sortTime += delta;
@@ -108,7 +128,9 @@ namespace GothicGodot.Spike
             {
                 // Nearest last: taken from the end.
                 _sortTime = 0;
-                _pending.Sort((a, b) => Distance(b.Bounds, eye).CompareTo(Distance(a.Bounds, eye)));
+                foreach (var piece in _pending)
+                    piece.Distance = Distance(piece.Bounds, eye);
+                _pending.Sort((a, b) => b.Distance.CompareTo(a.Distance));
             }
 
             if (_pending.Count > 0)
@@ -117,27 +139,27 @@ namespace GothicGodot.Spike
 
         private void Add(int index)
         {
-            var (piece, _, triangles) = _pending[index];
+            var piece = _pending[index];
             _pending.RemoveAt(index);
-            PendingTriangles -= triangles;
-            if (_target == null)
-            {
-                _target = new Node3D { Name = "WorldCollisionLate" };
-                _source.GetParent().AddChild(_target);
-            }
+            PendingTriangles -= piece.Triangles;
 
-            // A body of its own: adding to the big one would rebuild its compound shape of all pieces each time.
-            var body = new StaticBody3D
-            {
-                Name = $"Piece{_added}", CollisionLayer = _source.CollisionLayer, CollisionMask = _source.CollisionMask
-            };
-            body.AddChild(piece);
             var started = System.Diagnostics.Stopwatch.GetTimestamp();
-            _target.AddChild(body);
+            var body = PhysicsServer3D.BodyCreate();
+            PhysicsServer3D.BodySetMode(body, PhysicsServer3D.BodyMode.Static);
+            PhysicsServer3D.BodyAddShape(body, piece.Shape.GetRid());
+            PhysicsServer3D.BodySetCollisionLayer(body, _layer);
+            PhysicsServer3D.BodySetCollisionMask(body, _mask);
+            PhysicsServer3D.BodyAttachObjectInstanceId(body, _collider);
+            PhysicsServer3D.BodySetSpace(body, GetViewport().World3D.Space);
             var ms = System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds;
             _addMs += ms;
-            _maxAddMs = Math.Max(_maxAddMs, ms);
-            _added++;
+            // The first one includes the first calls into the server.
+            if (_added.Count > 0)
+                _maxAddMs = Math.Max(_maxAddMs, ms);
+            else
+                GD.Print($"[Collision] first late piece in {ms:F2} ms");
+            // The shape resource stays alive with the body.
+            _added.Add((body, piece.Shape));
         }
 
         private static float Distance(Aabb bounds, Vector3 point) =>

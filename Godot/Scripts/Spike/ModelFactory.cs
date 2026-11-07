@@ -212,12 +212,9 @@ namespace GothicGodot.Spike
                 return cached;
 
             ArrayMesh result = null;
-            if (_vfs.Find(mdmName) != null)
+            var model = GetModelMesh(mdmName);
+            if (model != null)
             {
-                // A model's .MDL holds its mesh too (meatbugs have no .MDM).
-                var model = mdmName.EndsWith(".MDL", StringComparison.OrdinalIgnoreCase)
-                    ? new ZenKit.Model(_vfs, mdmName).Cache().Mesh
-                    : new ModelMesh(_vfs, mdmName).Cache();
                 result = new ArrayMesh();
                 var surfaces = new[] { new SurfaceBuilder(_opaque), new SurfaceBuilder(_alpha) };
                 var names = GetVariantNames(variant, skin);
@@ -226,9 +223,8 @@ namespace GothicGodot.Spike
                 // Rigid parts hanging on one bone each (meatbugs, mobs' lids).
                 foreach (var (node, mrm) in model.Attachments)
                     AddAttachment(node, mrm, result, surfaces, names);
-                if (headMmb != null && _vfs.Find(headMmb) != null)
-                    AddAttachment(HeadBone, new MorphMesh(_vfs, headMmb).Cache().Mesh, result, surfaces,
-                        GetVariantNames(headVariant, skin));
+                if (GetHead(headMmb) is { } headMesh)
+                    AddAttachment(HeadBone, headMesh, result, surfaces, GetVariantNames(headVariant, skin));
                 foreach (var surface in surfaces)
                     surface.AddTo(result);
                 if (result.GetSurfaceCount() == 0)
@@ -240,6 +236,36 @@ namespace GothicGodot.Spike
         }
 
         public const string HeadBone = "BIP01 HEAD";
+
+        // Parsed once per file: with the head in the body's mesh, most NPCs have a mesh of their own, built from the
+        // same few bodies and heads (G2: 485 ms of the load went to parsing them again and looking them up).
+        private readonly Dictionary<string, IModelMesh> _modelMeshes = new(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, IMultiResolutionMesh> _heads = new(StringComparer.OrdinalIgnoreCase);
+
+        private IModelMesh GetModelMesh(string name)
+        {
+            if (_modelMeshes.TryGetValue(name, out var cached))
+                return cached;
+            IModelMesh mesh = null;
+            if (_vfs.Find(name) != null)
+                // A model's .MDL holds its mesh too (meatbugs have no .MDM).
+                mesh = name.EndsWith(".MDL", StringComparison.OrdinalIgnoreCase)
+                    ? new ZenKit.Model(_vfs, name).Cache().Mesh
+                    : new ModelMesh(_vfs, name).Cache();
+            _modelMeshes[name] = mesh;
+            return mesh;
+        }
+
+        private IMultiResolutionMesh GetHead(string name)
+        {
+            if (name == null)
+                return null;
+            if (_heads.TryGetValue(name, out var cached))
+                return cached;
+            var mesh = _vfs.Find(name) != null ? new MorphMesh(_vfs, name).Cache().Mesh : null;
+            _heads[name] = mesh;
+            return mesh;
+        }
 
         /// <summary>Triangles of one material collected into one surface.</summary>
         private class SurfaceBuilder
