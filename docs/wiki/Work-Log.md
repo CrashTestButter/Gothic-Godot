@@ -11,7 +11,11 @@ GOTHIC.DAT in ZenKit's Daedalus VM, all 1524 dialog condition functions (DIA_*_C
 | Desktop, CoreCLR | 21 ms | 874 per ms | 1.14 µs | 0.84 µs |
 | Quest 3, MonoVM | 42 ms | 165 per ms | 6.04 µs | 4.43 µs |
 
-5.3 times slower on the Quest: part slower CPU, part MonoVM's native/managed transitions. Rough budget: 60 active NPCs running state loops with ~10 externals each at 72 Hz are ~43000 externals per second, about 190 ms per second, a fifth of one core. Workable, but the first place to win back: NativeAOT (linux-bionic), Mono AOT, fewer transitions in ZenKit's C# binding, CoreCLR on Android (.NET 11).
+| Quest 3, NativeAOT (linux-bionic) | 34 ms | 177 per ms | 5.64 µs | 4.14 µs |
+
+5.3 times slower on the Quest than on the desktop, and NativeAOT wins only 7% over MonoVM: the native/managed transitions are not the cost, the Quest's CPU and ZenKit's own work per call are (the same that Gothic-Unity's IL2CPP build pays). Rough budget: 60 active NPCs running state loops with ~10 externals each at 72 Hz are ~43000 externals per second, about 190 ms per second, a fifth of one core. Workable. The place to win time back is fewer calls (ZenKit's C# binding reads every argument with its own P/Invoke), not the runtime.
+
+NativeAOT on the Quest works (export preset "QuestAOT", NDK clang on PATH, `PublishAot` for linux-bionic, ZenKit kept from trimming; Godot logs a harmless "can't open libmonosgen" once). Old Camp at 72 Hz: 71.7 FPS, NPC bones 0.90 ms for 60 humans and 1.98 ms for 150 - about the same as MonoVM (1.0-1.2 ms and 1.94 ms). MonoVM is good enough; NativeAOT stays an option.
 
 ## 2026-11-07 - Quest 3: the Old Camp runs native
 

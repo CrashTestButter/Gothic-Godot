@@ -15,7 +15,8 @@ How tied Gothic-Unity is to Unity today (split/14, 2026-11-06): 573 C# files (~8
 - No Quest store game written in Godot C# found.
 - Fixed: the C# startup crash on Quest (DLL extraction) in 4.5 ([godot#103915](https://github.com/godotengine/godot/issues/103915)).
 - Measured on the Quest 3 (2026-11-07): the spike runs on MonoVM without a single garbage collection while running, engine calls cost 0.27-0.3 µs each (desktop 0.14-0.23 µs), CPU 19-30%. See [[Work-Log]].
-- Status: **measured** for rendering and animation; game logic (Daedalus VM, AI) still to measure. Fix paths if needed later: Mono AOT, NativeAOT via linux-bionic, CoreCLR on Android from .NET 11 in a Godot fork.
+- Daedalus VM (dialog conditions with C# externals): 6.04 µs per condition on MonoVM, 5.64 µs on NativeAOT, 1.14 µs on the desktop. NativeAOT builds and runs on the Quest (rendering the same as MonoVM).
+- Status: **path** - MonoVM is good enough for the spike's load; NativeAOT works as the fallback. The remaining cost is ZenKit's per-call work, not the runtime.
 
 ### R2 - Quest rendering performance is unmeasured
 - Mobile renderer is the recommended XR path (4.7). Foveation on Vulkan Android and Application SpaceWarp on Quest and Pico since 4.5 ([vendors plugin](https://godotengine.org/article/godot-openxr-vendors-plugin-400/)), Vulkan subsampled images since 4.7 ([vr.org](https://vr.org/articles/godot-4-7-xr-steam-frame-android-xr-open-source-2026)).

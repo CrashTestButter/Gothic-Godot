@@ -17,10 +17,24 @@
 
   <!-- Native libraries go next to the published assemblies; Godot's export puts every .so of the publish output
        into the APK's lib/<abi> folder. The editor loads the linux-x64 ones through NativeLibraries.cs. -->
-  <ItemGroup Condition=" $(RuntimeIdentifier.StartsWith('android')) ">
+  <ItemGroup Condition=" $(RuntimeIdentifier.StartsWith('android')) or $(RuntimeIdentifier.StartsWith('linux-bionic')) ">
     <None Include="lib/android-arm64/*.so" CopyToPublishDirectory="PreserveNewest" Link="%(Filename)%(Extension)" />
   </ItemGroup>
-  <ItemGroup Condition=" $(RuntimeIdentifier.StartsWith('linux')) ">
+  <ItemGroup Condition=" $(RuntimeIdentifier.StartsWith('linux-x64')) ">
     <None Include="lib/linux-x64/*.so" CopyToPublishDirectory="PreserveNewest" Link="%(Filename)%(Extension)" />
+  </ItemGroup>
+  <!-- Quest with NativeAOT (export preset "QuestAOT", "Android Use Linux Bionic"): C# compiled ahead of time to
+       native code instead of MonoVM. Needs the Android NDK's clang first on PATH. -->
+  <PropertyGroup Condition=" $(RuntimeIdentifier.StartsWith('linux-bionic')) ">
+    <PublishAot>true</PublishAot>
+    <UseMonoRuntime>false</UseMonoRuntime>
+    <DisableUnsupportedError>true</DisableUnsupportedError>
+    <PublishAotUsingRuntimePack>true</PublishAotUsingRuntimePack>
+  </PropertyGroup>
+  <ItemGroup Condition=" $(RuntimeIdentifier.StartsWith('linux-bionic')) ">
+    <TrimmerRootAssembly Include="GodotSharp" />
+    <TrimmerRootAssembly Include="$(TargetName)" />
+    <TrimmerRootAssembly Include="ZenKit" />
+    <LinkerArg Include="-Wl,--undefined-version" />
   </ItemGroup>
 </Project>
