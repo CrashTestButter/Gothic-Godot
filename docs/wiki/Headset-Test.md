@@ -29,3 +29,6 @@ Everything since the 120 Hz run (2026-11-07) was built and tested without a head
 - `tools/quest-bench.sh 30 --hz=120 --ai=true --object-far=80 --pfx-far=40 --anim-far=80 --occluder-area=2 --msaa=2` (G1) and with `--game=2` (Khorinis, still never measured on the headset).
 - Watch in the `[Perf]` lines: garbage collections (voice lines load on a worker thread now), AI ms per second (desktop 14, Quest estimate ~70), long frames.
 - Compare with the 2026-11-07 run before the features: 119.1 FPS at 120 Hz, app GPU 4.67 ms.
+- Load time: the first start builds and saves the world cache, the second loads it (`[Spike] world cache` line). Desktop G2: 7.7 s first, 2.8 s after.
+- Textures: the Quest build compresses them to ETC2 (once, then cached); `--texture-compression=none` for the uncompressed look and GPU time to compare.
+- Trees: `--alpha-far=40` hides alpha tested objects (trees, bushes) at 40 m instead of the object distance; app GPU ms with and without.

@@ -47,6 +47,9 @@ namespace GothicGodot.Spike
         public string Screenshot => Get("screenshot", "");
         public bool IsVobsEnabled => Get("vobs", "true") == "true";
 
+        /// <summary>The texture array's compression: ETC2 on the Quest (compressed once, then from the world cache).</summary>
+        public string TextureCompression => Get("texture-compression", OS.GetName() == "Android" ? "etc2" : "none");
+
         public string Get(string key, string fallback) => _values.TryGetValue(key, out var value) ? value : fallback;
 
         public int GetInt(string key, int fallback) =>

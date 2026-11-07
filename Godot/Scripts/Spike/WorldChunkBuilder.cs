@@ -203,6 +203,14 @@ namespace GothicGodot.Spike
         /// </summary>
         public float ObjectFarDistance { get; set; }
 
+        /// <summary>
+        /// Alpha tested objects (trees, bushes, fences) hide at this distance instead (0: like the others): they were
+        /// the biggest GPU cost on the Quest when drawn far, overdraw of their leaves on a tile based GPU.
+        /// </summary>
+        public float AlphaObjectFarDistance { get; set; }
+
+        public bool CompressAttributes { get; set; }
+
         /// <summary>Kinds left out (benchmark: their share of the GPU time).</summary>
         public HashSet<Kind> SkippedKinds { get; } = new();
 
@@ -243,7 +251,10 @@ namespace GothicGodot.Spike
                 arrays[(int)Mesh.ArrayType.Index] = chunk.Indices.ToArray();
 
                 var arrayMesh = new ArrayMesh();
-                arrayMesh.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, arrays);
+                // --compress-meshes: 16-bit positions (per chunk bounds), octahedral normals, half-float UVs - less video
+                // memory and bandwidth for the Quest's tile based GPU.
+                arrayMesh.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, arrays, null, null,
+                    CompressAttributes ? Mesh.ArrayFormat.FlagCompressAttributes : 0);
                 arrayMesh.SurfaceSetMaterial(0, getMaterial(kind));
 
                 var instance = new MeshInstance3D
@@ -253,9 +264,12 @@ namespace GothicGodot.Spike
                     Position = center,
                     CastShadow = GeometryInstance3D.ShadowCastingSetting.Off
                 };
+                // The kind finds the shared material again when the cell comes from the world cache.
+                instance.SetMeta(_kindMeta, (int)kind);
                 if (isObject)
                 {
-                    instance.VisibilityRangeEnd = ObjectFarDistance + _cellSize * 0.5f;
+                    var far = kind == Kind.AlphaTest && AlphaObjectFarDistance > 0 ? AlphaObjectFarDistance : ObjectFarDistance;
+                    instance.VisibilityRangeEnd = far + _cellSize * 0.5f;
                     instance.VisibilityRangeEndMargin = 2f;
                 }
                 parent.AddChild(instance);
@@ -293,6 +307,19 @@ namespace GothicGodot.Spike
             _chunks.Clear();
             _objectChunks.Clear();
             _objectCollision.Clear();
+        }
+
+        private const string _kindMeta = "kind";
+
+        /// <summary>Gives every cell mesh below the node the material of its kind (null: none, before saving).</summary>
+        public static void SetMaterials(Node parent, Func<Kind, Material> getMaterial)
+        {
+            foreach (var child in parent.GetChildren())
+            {
+                if (child is MeshInstance3D { Mesh: ArrayMesh mesh } instance && instance.HasMeta(_kindMeta))
+                    mesh.SurfaceSetMaterial(0, getMaterial((Kind)instance.GetMeta(_kindMeta).AsInt32()));
+                SetMaterials(child, getMaterial);
+            }
         }
 
         private void AddOccluder(Node3D parent, Chunk chunk, string name)

@@ -98,6 +98,9 @@ namespace GothicGodot.Spike
             });
         }
 
+        /// <summary>Only collects the items and mobs: the merged objects come from the world cache.</summary>
+        public void CollectSeparated(IEnumerable<IVirtualObject> roots) => ForEachMeshObject(roots, null);
+
         /// <summary>
         /// The collected items as single bodies the hands can take: frozen where Gothic put them (no physics cost)
         /// until they are grabbed, then thrown and falling with physics.
@@ -191,7 +194,7 @@ namespace GothicGodot.Spike
                     Mobs.Add(((IInteractiveObject)vob, System.IO.Path.GetFileNameWithoutExtension(visual).ToUpperInvariant(),
                         new Transform3D(ToGodot(vob.Rotation), WorldChunkBuilder.ToGodot(vob.Position))));
                 }
-                else if (vob.ShowVisual && !string.IsNullOrEmpty(visual) && IsMeshVisual(visual))
+                else if (action != null && vob.ShowVisual && !string.IsNullOrEmpty(visual) && IsMeshVisual(visual))
                 {
                     var parts = GetParts(visual);
                     if (parts != null)

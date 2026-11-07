@@ -78,7 +78,18 @@ namespace GothicGodot.Spike
             var mesh = world.Mesh;
             Log($"world {_args.World} loaded in {watch.ElapsedMilliseconds} ms: {mesh.PolygonCount} polygons, managed {GC.GetTotalMemory(false) / 1048576} MB");
 
+            // The world built on an earlier start: chunks, collision, occluders, ground light and texture layers.
+            var cache = new WorldCache(_args);
             var textures = new TextureArrayBuilder(vfs, _args.SliceSize);
+            if (cache.IsHit)
+            {
+                cache.BeginLoadScene();
+                textures.LoadCache(cache.TexturesPath);
+            }
+            else if (cache.IsEnabled)
+                cache.Prepare();
+            if (cache.IsEnabled)
+                textures.CachePath = cache.TexturesPath;
             var materials = _materials = CreateMaterials();
             // Gothic's time of day: --hour to start, --time-speed (1 = Gothic's 100 minute day, 0 = stands still).
             _clock = new GameClock { Name = "Clock", Speed = _args.GetFloat("time-speed", 1f) };
@@ -91,16 +102,29 @@ namespace GothicGodot.Spike
             var builder = new WorldChunkBuilder(_args.CellSize)
             {
                 ObjectFarDistance = _args.GetFloat("object-far", 0f),
+                AlphaObjectFarDistance = _args.GetFloat("alpha-far", 0f),
+                CompressAttributes = _args.Get("compress-meshes", "false") == "true",
                 OccluderMinArea = _args.GetFloat("occluder-area", 0f)
             };
             if (builder.OccluderMinArea > 0)
                 GetViewport().UseOcclusionCulling = true;
-            builder.AddWorld(mesh, WorldChunkBuilder.GetLeafPolygons(world.BspTree.Cache()), textures, groundLight);
-            // The cached ZenKit mesh is the biggest managed object graph (G2: several hundred MB); free it now.
-            mesh = null;
-            GC.Collect(2, GCCollectionMode.Forced, true, true);
-            Log($"outdoor polygons {builder.OutdoorPolygons}, indoor {builder.IndoorPolygons}");
-            Log($"world polygons collected in {watch.ElapsedMilliseconds} ms, managed {GC.GetTotalMemory(false) / 1048576} MB");
+            if (cache.IsHit)
+            {
+                cache.LoadLight(groundLight);
+                Log($"world cache {cache.Folder}: {textures.LayerCount} texture layers read in {textures.CacheReadMs:F0} ms, " +
+                    $"ground light in {watch.ElapsedMilliseconds} ms");
+            }
+            else
+            {
+                builder.AddWorld(mesh, WorldChunkBuilder.GetLeafPolygons(world.BspTree.Cache()), textures, groundLight);
+                // The cached ZenKit mesh is the biggest managed object graph (G2: several hundred MB); free it now.
+                mesh = null;
+                GC.Collect(2, GCCollectionMode.Forced, true, true);
+                if (cache.IsEnabled)
+                    cache.SaveLight(groundLight);
+                Log($"outdoor polygons {builder.OutdoorPolygons}, indoor {builder.IndoorPolygons}");
+                Log($"world polygons collected in {watch.ElapsedMilliseconds} ms, managed {GC.GetTotalMemory(false) / 1048576} MB");
+            }
 
             // --vob-mode=nodes (one node per object), merged (objects in the world cells) or none.
             var vobMode = _args.IsVobsEnabled ? _args.Get("vob-mode", "merged") : "none";
@@ -117,6 +141,10 @@ namespace GothicGodot.Spike
                     AddChild(vobRoot);
                     vobs.BuildNodes(world.RootObjects, vobRoot, materials[3], materials[4]);
                 }
+                else if (cache.IsHit)
+                {
+                    vobs.CollectSeparated(world.RootObjects);
+                }
                 else
                 {
                     vobs.BuildMerged(world.RootObjects, builder);
@@ -124,8 +152,12 @@ namespace GothicGodot.Spike
 
                 _vobs = vobs;
 
-                Log($"objects ({vobMode}) built in {watch.ElapsedMilliseconds} ms: {vobs.InstanceCount} instances of " +
-                    $"{vobs.MeshCount} meshes, {vobs.MissingCount} missing");
+                if (cache.IsHit)
+                    Log($"objects in the cache, items and mobs collected in {watch.ElapsedMilliseconds} ms: " +
+                        $"{vobs.ItemCount} items, {vobs.Mobs.Count} mobs");
+                else
+                    Log($"objects ({vobMode}) built in {watch.ElapsedMilliseconds} ms: {vobs.InstanceCount} instances of " +
+                        $"{vobs.MeshCount} meshes, {vobs.MissingCount} missing");
             }
 
             if (_args.Get("pfx", "true") == "true")
@@ -166,13 +198,43 @@ namespace GothicGodot.Spike
                     builder.SkippedKinds.Add(kind);
 
             var isCollisionEnabled = _args.Get("collision", "true") == "true";
-            builder.CreateNodes(worldRoot, kind => materials[(int)kind], isCollisionEnabled);
+            Godot.Material MaterialOf(WorldChunkBuilder.Kind kind) => materials[(int)kind];
+            Dictionary<string, int> counts;
+            if (cache.IsHit)
+            {
+                var waitStarted = watch.ElapsedMilliseconds;
+                var chunks = cache.LoadScene(MaterialOf);
+                var addStarted = watch.ElapsedMilliseconds;
+                worldRoot.AddChild(chunks);
+                counts = cache.ReadInfo();
+                Log($"world scene: waited {addStarted - waitStarted} ms for the worker thread, " +
+                    $"added in {watch.ElapsedMilliseconds - addStarted} ms");
+            }
+            else
+            {
+                var chunks = new Node3D { Name = "Chunks" };
+                worldRoot.AddChild(chunks);
+                builder.CreateNodes(chunks, MaterialOf, isCollisionEnabled);
+                counts = new Dictionary<string, int>
+                {
+                    ["chunks"] = builder.ChunkCount, ["triangles"] = builder.TriangleCount,
+                    ["collision"] = builder.CollisionTriangleCount, ["occluders"] = builder.OccluderTriangleCount
+                };
+                if (cache.IsEnabled)
+                {
+                    var saveStarted = watch.ElapsedMilliseconds;
+                    cache.SaveScene(chunks, MaterialOf);
+                    Log($"world saved to the cache in {watch.ElapsedMilliseconds - saveStarted} ms");
+                }
+            }
+
             if (isCollisionEnabled)
-                Log($"collision: {builder.CollisionTriangleCount} triangles");
+                Log($"collision: {counts.GetValueOrDefault("collision")} triangles");
             if (builder.OccluderMinArea > 0)
-                Log($"occluders: {builder.OccluderTriangleCount} triangles of at least {builder.OccluderMinArea} m²");
-            Log($"world nodes created in {watch.ElapsedMilliseconds} ms: {builder.ChunkCount} chunks, " +
-                $"{builder.TriangleCount} triangles, {textures.LayerCount} texture layers, {textures.MissingCount} missing");
+                Log($"occluders: {counts.GetValueOrDefault("occluders")} triangles of at least {builder.OccluderMinArea} m²");
+            Log($"world nodes {(cache.IsHit ? "loaded" : "created")} in {watch.ElapsedMilliseconds} ms: " +
+                $"{counts.GetValueOrDefault("chunks")} chunks, {counts.GetValueOrDefault("triangles")} triangles, " +
+                $"{textures.LayerCount} texture layers, {textures.MissingCount} missing");
 
             if (textures.MissingCount > 0)
                 Log("textures missing: " + string.Join(", ", textures.MissingNames.Take(40)));
@@ -186,20 +248,26 @@ namespace GothicGodot.Spike
                     hero?.BodyTexture ?? 0, hero?.SkinColor ?? 0) ?? _humans.GetSkinnedMesh("HUM_BODY_NAKED0.MDM");
             }
 
-            textures.Compression = _args.Get("texture-compression", "none");
+            textures.Compression = _args.TextureCompression;
             var array = textures.Build();
             foreach (var material in materials)
             {
                 material.SetShaderParameter("albedo_array", array);
                 material.SetShaderParameter("light_scale", _args.GetFloat("light", 1f));
             }
-            Log($"texture array {_args.SliceSize}px uploaded in {watch.ElapsedMilliseconds} ms");
+            Log($"texture array {_args.SliceSize}px uploaded in {watch.ElapsedMilliseconds} ms (decoding {textures.DecodeMs:F0} ms, " +
+                $"building {textures.BuildMs:F0} ms, {textures.Compression})");
+            if (cache.IsEnabled && !cache.IsHit)
+                cache.Complete(counts);
 
             CreateEnvironment();
             if (_args.Get("player", "false") == "true")
                 CreatePlayer(isXr, GetCameraStart(world));
             else
                 CreateRig(isXr, GetCameraStart(world));
+            var spareCheck = _args.Get("spare-check", "");
+            if (spareCheck != "" && _camera != null)
+                AddSpareCheck(textures, spareCheck);
 
             // --record-audio=file.wav: what the master bus mixed, saved on quit (checks sound in headless runs).
             if (!string.IsNullOrEmpty(_args.Get("record-audio", "")))
@@ -247,6 +315,34 @@ namespace GothicGodot.Spike
         }
 
         private bool _areChestsOpened;
+
+        /// <summary>
+        /// --spare-check=TEXTURE.TGA: that texture asked for after loading, on a quad in front of the camera - checks
+        /// the array's spare layers (filled in the array's format).
+        /// </summary>
+        private void AddSpareCheck(TextureArrayBuilder textures, string texture)
+        {
+            var layer = textures.GetLayer(texture, out _);
+            Log($"spare check: {texture} on layer {layer} of {textures.BuiltLayerCount}");
+            var corners = new[] { new Vector3(-0.5f, -0.5f, 0), new Vector3(0.5f, -0.5f, 0), new Vector3(0.5f, 0.5f, 0),
+                new Vector3(-0.5f, 0.5f, 0) };
+            var arrays = new Godot.Collections.Array();
+            arrays.Resize((int)Godot.Mesh.ArrayType.Max);
+            arrays[(int)Godot.Mesh.ArrayType.Vertex] = corners;
+            arrays[(int)Godot.Mesh.ArrayType.Normal] = corners.Select(_ => Vector3.Back).ToArray();
+            arrays[(int)Godot.Mesh.ArrayType.TexUV] = new[] { new Vector2(0, 1), new Vector2(1, 1), new Vector2(1, 0), Vector2.Zero };
+            arrays[(int)Godot.Mesh.ArrayType.TexUV2] = corners.Select(_ => new Vector2(layer, 0)).ToArray();
+            // Both sides.
+            arrays[(int)Godot.Mesh.ArrayType.Index] = new[] { 0, 3, 2, 0, 2, 1, 0, 2, 3, 0, 1, 2 };
+            var mesh = new ArrayMesh();
+            mesh.AddSurfaceFromArrays(Godot.Mesh.PrimitiveType.Triangles, arrays);
+            mesh.SurfaceSetMaterial(0, _materials[3]);
+            var quad = new MeshInstance3D { Name = "SpareCheck", Mesh = mesh };
+            AddChild(quad);
+            var view = _camera.GlobalTransform;
+            quad.GlobalTransform = new Transform3D(view.Basis, view.Origin - view.Basis.Z * 1.5f);
+            quad.SetInstanceShaderParameter("tint", Colors.White);
+        }
 
         /// <summary>The clock's minute for the AI and the music; light and sky follow the daylight once a second.</summary>
         private void OnMinute(int minute)
@@ -388,6 +484,9 @@ namespace GothicGodot.Spike
         /// </summary>
         private void BuildChests(Vfs vfs, ShaderMaterial[] materials, Stopwatch watch)
         {
+            // --preload-items=false: items carried or in chests get their textures when they show up (checks the
+            // array's spare layers).
+            var isPreloading = _args.Get("preload-items", "true") == "true";
             var factories = new Dictionary<string, ModelFactory>(StringComparer.OrdinalIgnoreCase);
             var root = new Node3D { Name = "Chests" };
             AddChild(root);
@@ -431,11 +530,12 @@ namespace GothicGodot.Spike
                 }
 
                 _chests.Add(chest);
-                foreach (var entry in Gothic.Core.Extensions.ContentItemExtension.UnpackItems(contents))
-                    _vobs.Preload(ItemInfo(entry.Name.Trim())?.Visual);
+                if (isPreloading)
+                    foreach (var entry in Gothic.Core.Extensions.ContentItemExtension.UnpackItems(contents))
+                        _vobs.Preload(ItemInfo(entry.Name.Trim())?.Visual);
             }
 
-            if (_ai != null)
+            if (_ai != null && isPreloading)
                 foreach (var npc in _ai.Npcs.Append(_ai.Hero))
                     foreach (var instance in npc.Inventory.Items)
                         _vobs.Preload(ItemInfo(instance)?.Visual);

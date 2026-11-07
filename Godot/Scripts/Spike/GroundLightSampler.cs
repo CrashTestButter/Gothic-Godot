@@ -25,6 +25,48 @@ namespace GothicGodot.Spike
             list.Add((position.Y, color));
         }
 
+        /// <summary>The cells for the world cache: cell count, then per cell x, z, count and (y, r, g, b, a).</summary>
+        public void Save(string path)
+        {
+            using var writer = new System.IO.BinaryWriter(System.IO.File.Create(path));
+            writer.Write(_cells.Count);
+            foreach (var ((x, z), list) in _cells)
+            {
+                writer.Write(x);
+                writer.Write(z);
+                writer.Write(list.Count);
+                foreach (var (y, color) in list)
+                {
+                    writer.Write(y);
+                    writer.Write(color.R);
+                    writer.Write(color.G);
+                    writer.Write(color.B);
+                    writer.Write(color.A);
+                }
+            }
+        }
+
+        public void Load(string path)
+        {
+            // In one read: value by value through a BinaryReader took 200 ms for G2's 11 MB.
+            var data = System.IO.File.ReadAllBytes(path);
+            var offset = 0;
+            int NextInt() { var value = System.BitConverter.ToInt32(data, offset); offset += 4; return value; }
+            float NextFloat() { var value = System.BitConverter.ToSingle(data, offset); offset += 4; return value; }
+
+            _cells.Clear();
+            var cellCount = NextInt();
+            for (var c = 0; c < cellCount; c++)
+            {
+                var key = (NextInt(), NextInt());
+                var count = NextInt();
+                var list = new List<(float, Color)>(count);
+                for (var i = 0; i < count; i++)
+                    list.Add((NextFloat(), new Color(NextFloat(), NextFloat(), NextFloat(), NextFloat())));
+                _cells[key] = list;
+            }
+        }
+
         public Color Sample(Vector3 position, Color fallback)
         {
             var cx = (int)Mathf.Floor(position.X / _cellSize);
