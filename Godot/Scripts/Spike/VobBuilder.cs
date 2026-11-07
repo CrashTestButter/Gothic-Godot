@@ -123,16 +123,35 @@ namespace GothicGodot.Spike
 
         public Color LightAt(Vector3 position) => SampleLight(position);
 
-        /// <summary>The convex hull, or a box for flat items (coins, letters): a hull without thickness doesn't collide.</summary>
-        private static (Shape3D, Vector3) GetItemShape(ArrayMesh mesh)
+        private readonly Dictionary<string, (Shape3D Shape, Vector3 Offset)> _hulls = new(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>
+        /// The box around the item (at least 2 cm thick): enough while it lies frozen and for the hands to find it.
+        /// Convex hulls for all of them took 3 s of G2's load.
+        /// </summary>
+        private static (Shape3D, Vector3) GetItemBox(ArrayMesh mesh)
         {
             var bounds = mesh.GetAabb();
             var size = bounds.Size;
-            if (size.X >= _minItemThickness && size.Y >= _minItemThickness && size.Z >= _minItemThickness)
-                return (mesh.CreateConvexShape(true, true), Vector3.Zero);
             var box = new Vector3(Mathf.Max(size.X, _minItemThickness), Mathf.Max(size.Y, _minItemThickness),
                 Mathf.Max(size.Z, _minItemThickness));
             return (new BoxShape3D { Size = box }, bounds.GetCenter());
+        }
+
+        /// <summary>
+        /// The convex hull for an item that gets taken (it may fly and roll), once per visual; flat items (coins,
+        /// letters) keep their box - a hull without thickness doesn't collide.
+        /// </summary>
+        private (Shape3D, Vector3) GetItemHull(string visual, ArrayMesh mesh)
+        {
+            if (_hulls.TryGetValue(visual, out var cached))
+                return cached;
+            var size = mesh.GetAabb().Size;
+            var hull = size.X >= _minItemThickness && size.Y >= _minItemThickness && size.Z >= _minItemThickness
+                ? ((Shape3D)mesh.CreateConvexShape(true, true), Vector3.Zero)
+                : GetItemBox(mesh);
+            _hulls[visual] = hull;
+            return hull;
         }
 
         /// <summary>One item body (also for items taken out of the inventory); null without a mesh.</summary>
@@ -146,9 +165,9 @@ namespace GothicGodot.Spike
                 return null;
             var mesh = GetArrayMesh(visual, parts, opaque, alpha);
             if (!_shapes.TryGetValue(visual, out var shape))
-                _shapes[visual] = shape = GetItemShape(mesh);
+                _shapes[visual] = shape = GetItemBox(mesh);
             var item = new GothicGodot.Interaction.WorldItem { Name = instance, Instance = instance, Transform = transform };
-            item.Setup(mesh, shape.Shape, shape.Offset, SampleLight(transform.Origin), far);
+            item.Setup(mesh, shape.Shape, shape.Offset, SampleLight(transform.Origin), far, () => GetItemHull(visual, mesh));
             return item;
         }
 
