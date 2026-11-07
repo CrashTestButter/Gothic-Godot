@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
@@ -27,6 +28,7 @@ namespace GothicGodot.Spike
         private HumanCrowd _crowd;
         private GothicAi _ai;
         private AudioEffectRecord _recorder;
+        private VobBuilder _vobs;
 
         public override void _Ready()
         {
@@ -88,7 +90,10 @@ namespace GothicGodot.Spike
             var vobMode = _args.IsVobsEnabled ? _args.Get("vob-mode", "merged") : "none";
             if (vobMode != "none")
             {
-                var vobs = new VobBuilder(vfs, textures, groundLight);
+                var vobs = new VobBuilder(vfs, textures, groundLight)
+                {
+                    SeparateItems = _args.Get("items", "true") == "true"
+                };
                 if (vobMode == "nodes")
                 {
                     var vobRoot = new Node3D { Name = "Vobs" };
@@ -99,6 +104,8 @@ namespace GothicGodot.Spike
                 {
                     vobs.BuildMerged(world.RootObjects, builder);
                 }
+
+                _vobs = vobs;
 
                 Log($"objects ({vobMode}) built in {watch.ElapsedMilliseconds} ms: {vobs.InstanceCount} instances of " +
                     $"{vobs.MeshCount} meshes, {vobs.MissingCount} missing");
@@ -130,6 +137,9 @@ namespace GothicGodot.Spike
                 crowd.Spawn(humans, world, npcCount, groundLight, _args.Get("bone-mode", "split"), _args.IsGothic2);
                 Log($"humans spawned in {watch.ElapsedMilliseconds} ms: {crowd.Count}");
             }
+
+            if (_vobs?.ItemCount > 0)
+                BuildItems(vfs, materials, watch);
 
             foreach (var skipped in _args.Get("skip", "").Split(',', StringSplitOptions.RemoveEmptyEntries))
                 if (Enum.TryParse<WorldChunkBuilder.Kind>(skipped, true, out var kind))
@@ -222,6 +232,35 @@ namespace GothicGodot.Spike
             recording?.SaveToWav(path);
             Log($"audio recorded to {path}: {recording?.GetLength():F1} s");
             _recorder = null;
+        }
+
+        /// <summary>The world's items as grabbable bodies; their meshes come from the scripts (C_ITEM.visual).</summary>
+        private void BuildItems(Vfs vfs, ShaderMaterial[] materials, Stopwatch watch)
+        {
+            var vm = _ai?.Vm ?? new ZenKit.DaedalusVm(vfs, "GOTHIC.DAT",
+                (byte)(ZenKit.DaedalusExecutionFlags.AllowNullInstanceAccess |
+                       ZenKit.DaedalusExecutionFlags.IgnoreConstSpecifier));
+            if (_ai == null)
+                vm.RegisterExternalDefault((_, _) => { });
+            var visuals = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+            string VisualOf(string instance)
+            {
+                if (visuals.TryGetValue(instance, out var cached))
+                    return cached;
+                string visual = null;
+                // Only real instances: InitInstance on another symbol ends the process natively.
+                var symbol = vm.GetSymbolByName(instance);
+                if (symbol is { Type: ZenKit.DaedalusDataType.Instance })
+                    visual = vm.InitInstance<ZenKit.Daedalus.ItemInstance>(symbol)?.Visual;
+                visuals[instance] = visual;
+                return visual;
+            }
+
+            var root = new Node3D { Name = "Items" };
+            AddChild(root);
+            _vobs.BuildItems(root, materials[3], materials[4], VisualOf, _args.GetFloat("item-far", 25f));
+            Log($"items built in {watch.ElapsedMilliseconds} ms: {_vobs.ItemsBuilt} of {_vobs.ItemCount} grabbable");
         }
 
         private void BuildParticles(Vfs vfs, ZenKit.World world, Stopwatch watch)
@@ -511,6 +550,13 @@ namespace GothicGodot.Spike
             player.Rotation = new Vector3(0, Mathf.DegToRad(_args.GetFloat("yaw", 0f)), 0);
             _ai?.SetHero(player);
             _camera = player.Camera;
+            if (_args.Get("grab-test", "false") == "true")
+            {
+                var test = new GothicGodot.Interaction.GrabTest { Name = "GrabTest" };
+                AddChild(test);
+                test.Init(player, GetNodeOrNull<Node3D>("Items"), _args.Screenshot);
+            }
+
             if (_ai?.Dialog != null)
             {
                 var dialog = new GothicGodot.Dialog.DialogPanel { Name = "Dialog" };

@@ -57,6 +57,7 @@ namespace GothicGodot.Spike
 
         public int Count => _npcs.Count;
         public IReadOnlyList<GothicNpc> Npcs => _npcs;
+        public DaedalusVm Vm => _vm;
         public GothicDialog Dialog { get; private set; }
         public NpcInstance HeroInstance => _hero?.Instance;
         public Vector3 HeroPosition => _hero?.Root != null ? _hero.Root.GlobalPosition : Vector3.Zero;

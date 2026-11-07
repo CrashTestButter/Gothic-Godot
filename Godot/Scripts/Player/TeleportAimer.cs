@@ -61,7 +61,7 @@ namespace GothicGodot.Player
             {
                 var next = position + velocity * _step;
                 velocity.Y -= _gravity * _step;
-                var query = PhysicsRayQueryParameters3D.Create(position, next);
+                var query = PhysicsRayQueryParameters3D.Create(position, next, Interaction.PhysicsLayers.World);
                 query.Exclude = exclude;
                 var hit = space.IntersectRay(query);
                 if (hit.Count > 0)

@@ -93,6 +93,7 @@ namespace GothicGodot.Spike
                      $" managed {GC.GetTotalMemory(false) / 1048576} MB static {OS.GetStaticMemoryUsage() / 1048576} MB" +
                      $" | render cpu {_renderCpuMs / _frames:F2} gpu {_renderGpuMs / _frames:F2} setup {_setupCpuMs / _frames:F2}" +
                      $" process avg {_processMs / _frames:F2} ms" +
+                     $" physics {Performance.GetMonitor(Performance.Monitor.TimePhysicsProcess) * 1000:F2} ms" +
                      $" | long {_longFrames} (gc {_longWithGc}, state loops {_longWithLoops}, pfx culler {_longWithPfx}," +
                      $" ai+anim>2ms {_longWithAi}, avg ai {(_longFrames > 0 ? _longAiMs / _longFrames : 0):F2}" +
                      $" anim {(_longFrames > 0 ? _longAnimationMs / _longFrames : 0):F2} ms)");

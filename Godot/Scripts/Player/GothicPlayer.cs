@@ -43,12 +43,24 @@ namespace GothicGodot.Player
         private bool _isTeleportTestDone;
 
         public Camera3D Camera => _isXr ? _xrCamera : _desktopCamera;
+        public Interaction.GrabHand LeftGrab { get; private set; }
+        public Interaction.GrabHand RightGrab { get; private set; }
         public bool IsXr => _isXr;
         public XRController3D RightHand => _right;
         public bool IsPlaced => _isPlaced;
 
         /// <summary>Gothic pins the hero in a dialog: no walking, turning or teleporting (the head still looks).</summary>
         public bool IsInputLocked { get; set; }
+
+        /// <summary>Desktop: turns the body and tilts the eyes so the camera looks at the point (tests).</summary>
+        public void LookAtPoint(Vector3 target)
+        {
+            var direction = (target - Camera.GlobalPosition).Normalized();
+            Rotation = new Vector3(0, Mathf.Atan2(-direction.X, -direction.Z), 0);
+            _pitch = Mathf.Asin(Mathf.Clamp(direction.Y, -1f, 1f));
+            if (_desktopCamera != null)
+                _desktopCamera.Rotation = new Vector3(_pitch, 0, 0);
+        }
 
         /// <summary>Puts the player's feet at the position, facing along the yaw (radians).</summary>
         public void PlaceAt(Vector3 position, float yaw)
@@ -68,6 +80,8 @@ namespace GothicGodot.Player
             FloorStopOnSlope = true;
             SafeMargin = 0.02f;
 
+            CollisionLayer = Interaction.PhysicsLayers.Player;
+            CollisionMask = Interaction.PhysicsLayers.World;
             _shape = new CollisionShape3D { Shape = new CapsuleShape3D { Radius = _radius, Height = _desktopEyeHeight } };
             _shape.Position = new Vector3(0, _desktopEyeHeight * 0.5f, 0);
             AddChild(_shape);
@@ -80,6 +94,8 @@ namespace GothicGodot.Player
                 _origin.AddChild(_xrCamera);
                 _left = CreateHand("LeftHand", "left_hand");
                 _right = CreateHand("RightHand", "right_hand");
+                LeftGrab = CreateGrab(_left, "LeftGrab");
+                RightGrab = CreateGrab(_right, "RightGrab");
             }
             else
             {
@@ -88,6 +104,13 @@ namespace GothicGodot.Player
                     Name = "Eyes", Position = new Vector3(0, _desktopEyeHeight, 0), Far = far, Fov = 75f, Current = true
                 };
                 AddChild(_desktopCamera);
+                // The desktop hand: low right in front of the eyes; the right mouse button holds an item there.
+                RightGrab = new Interaction.GrabHand
+                {
+                    Name = "RightGrab", Position = new Vector3(0.22f, -0.25f, -0.55f), AimCamera = _desktopCamera,
+                    IsGripDown = () => Input.IsMouseButtonPressed(MouseButton.Right)
+                };
+                _desktopCamera.AddChild(RightGrab);
                 if (walkTestSeconds <= 0 && DisplayServer.GetName() != "headless")
                     Input.MouseMode = Input.MouseModeEnum.Captured;
             }
@@ -96,6 +119,16 @@ namespace GothicGodot.Player
             AddChild(_teleport);
 
             Logger.Log($"[Player] {(isXr ? "XR" : "desktop")} player, slope limit {slopeDegrees}°, step {_stepHeight} m", LogCat.VR);
+        }
+
+        private static Interaction.GrabHand CreateGrab(XRController3D hand, string name)
+        {
+            var grab = new Interaction.GrabHand
+            {
+                Name = name, IsGripDown = () => hand.GetFloat("grip") > 0.6f || hand.IsButtonPressed("grip_click")
+            };
+            hand.AddChild(grab);
+            return grab;
         }
 
         private XRController3D CreateHand(string name, string tracker)
@@ -166,7 +199,7 @@ namespace GothicGodot.Player
             var space = GetWorld3D().DirectSpaceState;
             // From high up: a spawn point can lie inside a hill (the Old Camp's ring centre is below the castle yard).
             var from = GlobalPosition + Vector3.Up * 100f;
-            var query = PhysicsRayQueryParameters3D.Create(from, from + Vector3.Down * 200f);
+            var query = PhysicsRayQueryParameters3D.Create(from, from + Vector3.Down * 200f, Interaction.PhysicsLayers.World);
             query.Exclude = new Godot.Collections.Array<Rid> { GetRid() };
             var hit = space.IntersectRay(query);
             if (hit.Count == 0 && ++_placeAttempts < 120)

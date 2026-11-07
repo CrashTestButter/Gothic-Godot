@@ -26,6 +26,13 @@ namespace GothicGodot.Spike
         private readonly GroundLightSampler _light;
         private readonly Dictionary<string, List<MeshPart>> _parts = new(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, ArrayMesh> _meshes = new(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, Shape3D> _shapes = new(StringComparer.OrdinalIgnoreCase);
+        private readonly List<(IItem Vob, string Visual, Transform3D Transform)> _items = new();
+
+        /// <summary>Items (oCItem) are left out of the merged cells and collected for <see cref="BuildItems"/>.</summary>
+        public bool SeparateItems { get; set; }
+        public int ItemCount => _items.Count;
+        public int ItemsBuilt { get; private set; }
 
         public int InstanceCount { get; private set; }
         public int MeshCount => _parts.Count;
@@ -84,6 +91,35 @@ namespace GothicGodot.Spike
             });
         }
 
+        /// <summary>
+        /// The collected items as single bodies the hands can take: frozen where Gothic put them (no physics cost)
+        /// until they are grabbed, then thrown and falling with physics.
+        /// </summary>
+        public void BuildItems(Node3D parent, Material opaque, Material alpha, Func<string, string> visualOf, float far)
+        {
+            foreach (var (vob, savedVisual, transform) in _items)
+            {
+                var visual = visualOf(vob.Instance) ?? savedVisual;
+                if (string.IsNullOrEmpty(visual) || !IsMeshVisual(visual))
+                    continue;
+                var parts = GetParts(visual);
+                if (parts == null)
+                    continue;
+                var mesh = GetArrayMesh(visual, parts, opaque, alpha);
+                if (!_shapes.TryGetValue(visual, out var shape))
+                    _shapes[visual] = shape = mesh.CreateConvexShape(true, true);
+                var item = new GothicGodot.Interaction.WorldItem
+                {
+                    Name = vob.Instance,
+                    Instance = vob.Instance,
+                    Transform = transform
+                };
+                item.Setup(mesh, shape, SampleLight(transform.Origin), far);
+                parent.AddChild(item);
+                ItemsBuilt++;
+            }
+        }
+
         private Color SampleLight(Vector3 position) => _light.Sample(position, new Color(0.6f, 0.6f, 0.6f));
 
         private void ForEachMeshObject(IEnumerable<IVirtualObject> roots,
@@ -92,7 +128,13 @@ namespace GothicGodot.Spike
             void Walk(IVirtualObject vob)
             {
                 var visual = vob.Visual?.Name;
-                if (vob.ShowVisual && !string.IsNullOrEmpty(visual) && IsMeshVisual(visual))
+                if (SeparateItems && vob is IItem item)
+                {
+                    // The visual comes from the item's script instance (C_ITEM.visual), resolved in BuildItems.
+                    _items.Add((item, visual,
+                        new Transform3D(ToGodot(vob.Rotation), WorldChunkBuilder.ToGodot(vob.Position))));
+                }
+                else if (vob.ShowVisual && !string.IsNullOrEmpty(visual) && IsMeshVisual(visual))
                 {
                     var parts = GetParts(visual);
                     if (parts != null)

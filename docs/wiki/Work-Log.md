@@ -2,6 +2,19 @@
 
 Newest first.
 
+## 2026-11-07 - Items: take them, throw them
+
+![An ore nugget in the desktop hand](images/grab-nugget-held.png)
+![Thrown, lying on the ground](images/grab-nugget-landed.png)
+
+- The world's items (oCItem) stay out of the merged cells: each one is its own body, frozen where Gothic put it (no physics cost) until a hand takes it. Their meshes come from the scripts (C_ITEM.visual), the ZEN stores only the instance name. G1: 746 of 749 items.
+- Our own interaction instead of Godot XR Tools (GDScript only, see [[Godot-Risks]]): a C# grab hand. XR - the grip takes the nearest item within 12 cm of the hand and keeps it where it was touched; desktop - the right mouse button takes the item nearest the view line within 2.5 m into a hand in front of the camera. Letting go throws it with the hand's velocity and turn (averaged over 4 physics frames).
+- Physics layers: world, player, items. Items land on the world and on each other; the player walks through them; the player's ground and teleport rays only see the world.
+- Items are hidden beyond 25 m (`--item-far`): every item is a draw call. Old Camp view with many items: 347 draws instead of 330, physics 0.2-0.3 ms with and without them.
+- Tested without a headset (`--grab-test=true`): walks up to the nearest item outdoors, takes it, turns, lets go: an ore nugget thrown 1.3 m, at rest on the ground.
+- Found on the way: Gothic's items often sink into the table or shelf they lie on, so a pick ray stops at the furniture; the desktop pick reaches 0.5 m past the first surface.
+- Not in it yet: inventory (putting items away, Gothic's bag), items from the scripts (Wld_InsertItem), the hero's real hands, two-handed weapons, chests and other mobs.
+
 ## 2026-11-07 - Music: Gothic's DirectMusic score
 
 - Gothic's themes (C_MUSICTHEME in MUSIC.DAT) through dmusic, like Gothic-Unity's music: the music zone the hero is in (the zone playing stays while he is inside, else the last zone containing him in world order, else the world's default zone), day 4:00-21:00 or night (night falls back to day), transitions with the theme's embellishment and timing.
