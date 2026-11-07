@@ -79,7 +79,7 @@ namespace GothicGodot.Interaction
                     if (_time < 0.6)
                         break;
                     _time = 0;
-                    var forward = -_target.Root.GlobalBasis.Z;
+                    var forward = _target.Forward;
                     forward.Y = 0;
                     _player.PlaceAt(_target.Position + forward.Normalized() * 1.1f, 0);
                     _player.LookAtPoint(_target.Position + Vector3.Up * 1.1f);

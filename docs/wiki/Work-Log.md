@@ -2,6 +2,27 @@
 
 Newest first.
 
+## 2026-11-07 - Optimization round 1: measured with a profiler
+
+dotnet-trace (sampled thread time, 15 s) on G2 Khorinis with 239 scripted NPCs showed the managed main thread spending its time in engine calls, not in the scripts: reading NPC positions from the scene (`GlobalPosition`, 27%), bone poses (28%, positions for every bone every frame), the frustum check per NPC (8.5%), the nearest waypoint scanning all waypoints (6.6%), the freepoint search (7%); the Daedalus scripts themselves ~7%.
+
+| Khorinis, desktop | before | after |
+|---|---|---|
+| AI | 16-25 ms per second | 6.4-7.8 ms per second (VM ~3) |
+| Animation | 0.42 ms per frame | 0.15 ms per frame |
+| Godot's static memory | 466 MB | 217 MB |
+
+What changed:
+- NPCs keep their position and facing themselves (the AI moves them anyway); the scene node is only written when it changes, hidden NPCs only when they are shown again. The hero's position is read once per frame.
+- Per clip, which bones actually move; between frames of the same clip only those are written (the full pose once when a clip starts). Gothic's clips carry a position for every bone, mostly only the root's changes.
+- The camera's frustum and position once per frame instead of engine calls per NPC.
+- Nearest waypoint and freepoint lookups ring by ring over grids (16 m, 8 m) instead of scanning all of them; the path search is A* on integer indices with reused buffers instead of a breadth-first search over string dictionaries (it runs whenever an NPC sets off - the cause of the Quest's long frames earlier).
+- The texture builder let go of the decoded images after the upload (~250 MB in G2; textures that come later decode again).
+- Chests and doors are hidden beyond 50 m like Gothic's object fade (each is a draw call and a skeleton).
+- `--texture-compression=etc2|astc|s3tc|none` for the texture array, default none until measured on the Quest. Desktop: ETC2 +1.6 s load, s3tc +2.5 s, ASTC +41 s (too slow to compress at load; would need a cache).
+
+Both suites pass after each step (18 of 18).
+
 ## 2026-11-07 - Textures after loading, the scripts' items
 
 - The texture array is uploaded once, so a surface whose texture first shows up later (a reward item, an item nobody carried at load) got a wrong layer. Such surfaces now get a material of their own with just that texture (one more draw call each, but only for those). `GOTHIC_LATE_TEXTURES=1` sends every item made after loading down that path to check it: the ore nugget and the potion render the same.

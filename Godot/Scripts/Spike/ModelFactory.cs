@@ -27,9 +27,34 @@ namespace GothicGodot.Spike
 
             public double Duration => Fps > 0 ? FrameCount / Fps : 0;
 
+            /// <summary>
+            /// Per channel: does the bone move within the clip? Gothic's clips carry a position for every bone, but
+            /// mostly only the root's changes - writing the others each frame was most of the bone calls.
+            /// </summary>
+            public bool[] IsPositionAnimated;
+            public bool[] IsRotationAnimated;
+
+            internal void FindAnimatedChannels()
+            {
+                var channels = Nodes.Length;
+                IsPositionAnimated = new bool[channels];
+                IsRotationAnimated = new bool[channels];
+                for (var frame = 1; frame < FrameCount; frame++)
+                for (var channel = 0; channel < channels; channel++)
+                {
+                    var index = frame * channels + channel;
+                    if (!IsPositionAnimated[channel] && Positions[index].DistanceSquaredTo(Positions[channel]) > 1e-8f)
+                        IsPositionAnimated[channel] = true;
+                    if (!IsRotationAnimated[channel] && Mathf.Abs(Rotations[index].Dot(Rotations[channel])) < 0.9999995f)
+                        IsRotationAnimated[channel] = true;
+                }
+            }
+
             /// <summary>The pose at the time (seconds), frames interpolated; held on the last frame if not looping.</summary>
             /// <param name="isOnePoseCall">One SetBonePose per bone instead of position and rotation calls.</param>
-            public void Apply(Skeleton3D skeleton, double time, bool isLooping, bool isOnePoseCall = false)
+            /// <param name="isFull">Every channel (the clip just started); else only the ones that move.</param>
+            public void Apply(Skeleton3D skeleton, double time, bool isLooping, bool isOnePoseCall = false,
+                bool isFull = true)
             {
                 if (FrameCount == 0)
                     return;
@@ -46,6 +71,10 @@ namespace GothicGodot.Spike
                 var channels = Nodes.Length;
                 for (var channel = 0; channel < channels; channel++)
                 {
+                    var isPositionSet = isFull || IsPositionAnimated == null || IsPositionAnimated[channel];
+                    var isRotationSet = isFull || IsRotationAnimated == null || IsRotationAnimated[channel];
+                    if (!isPositionSet && !isRotationSet)
+                        continue;
                     var a = frame0 * channels + channel;
                     var b = frame1 * channels + channel;
                     var bone = Nodes[channel];
@@ -54,12 +83,13 @@ namespace GothicGodot.Spike
                     if (isOnePoseCall)
                     {
                         skeleton.SetBonePose(bone, new Transform3D(new Basis(rotation), position));
+                        continue;
                     }
-                    else
-                    {
+
+                    if (isPositionSet)
                         skeleton.SetBonePosePosition(bone, position);
+                    if (isRotationSet)
                         skeleton.SetBonePoseRotation(bone, rotation);
-                    }
                 }
             }
         }
@@ -260,6 +290,7 @@ namespace GothicGodot.Spike
                 }
             }
 
+            clip?.FindAnimatedChannels();
             _clips[name] = clip;
             return clip;
         }

@@ -18,6 +18,10 @@
 - Scripted tests: `Godot/tools/run-tests.sh [1|2] [dialog grab bag use chest door lock]` runs each one headless and prints PASS / FAIL (`--dialog-test`, `--grab-test=true|bag|use`, `--chest-test`, `--door-test`, `--lock-test`; also `--walk-test=<s>`, `--teleport-test=<s>`).
 - Helpers: `--record-audio=<file.wav>` saves the mix, `--count-externals` lists the scripts' externals the spike lacks, `--shots=%MODEL,<m>` frames the first NPC of a model, `--open-chests=true`, `--hand-preview=true`.
 
+## The wonderbranch
+
+Branch `wonderbranch` is Gothic Godot on top of Todi's Gothic-Unity wonderbranch (all his open PRs together): the Unity side is exactly that branch, the Godot side comes from `main`, and the shared core compiles against the newer scripts (87 files instead of 78). `Godot/tools/sync-wonderbranch.sh [--test] [--push]` refreshes it from the local Gothic-Unity checkout (`GOTHIC_UNITY`, default `../Gothic-Unity`): it snapshots the wonderbranch's tree as one commit on Gothic-Unity main (its own history holds an editor crash dump and isn't published), lays `Godot/`, `forks/`, `docs/wiki/` and the README from `main` over it, regenerates the core list, builds, and with `--test` runs both suites. Godot work stays on `main`; the wonderbranch only takes it.
+
 ## Android / Quest
 
 Traps found while getting the spike onto the Quest 3:
