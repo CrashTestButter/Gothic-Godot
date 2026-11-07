@@ -15,6 +15,21 @@ Newest first.
 - Collision now only for the world itself (G2: 462k triangles instead of 2.7 million with the objects).
 - Quest numbers for Khorinis: pending - the headset dropped off USB (battery after hours with the proximity sensor overridden).
 
+Estimate until then: G1 and G2 on the desktop with the settings measured on the Quest (one Quest eye's resolution 2064x2208, MSAA 2x, objects 80 m, particles 40 m, animation culling, occluders, scripted NPCs, the same turning camera), then G2 on the Quest = G1 on the Quest x (G2 / G1 on the desktop) for each cost:
+
+| | G1 desktop | G2 desktop | G2 / G1 | G1 Quest 3, 120 Hz (measured) | G2 Quest 3 (estimate) |
+|---|---|---|---|---|---|
+| GPU (Godot's timer) | 0.32 ms | 0.41 ms | 1.28 | 4.27 ms (VrApi app GPU 4.67) | ~5.5 ms (app GPU ~6.0) |
+| Render CPU | 0.45 ms | 0.59 ms | 1.31 | 1.42 ms | ~1.9 ms |
+| Draw calls | 31 (12-63) | 77 (27-111) | 2.5 | 20-129 | ~50-320 |
+| Triangles | 97k | 315k | 3.2 | 91k-166k | ~290k-530k |
+| AI | 5.7 ms/s | 3.0 ms/s | 0.5 | 15-50 ms/s | ~10-30 ms/s |
+| Animation | 0.23 ms | 0.32 ms | 1.4 | 0.74-0.97 ms | ~1.0-1.4 ms |
+
+- Within the 120 Hz budget on paper (8.3 ms GPU, CPU well below), 90 Hz with room. The weak spot is the triangle count: 3.2 times more triangles cost the desktop GPU only 28% more, but a tile-based mobile GPU pays more per triangle, so ~6-7.5 ms GPU on the Quest is possible - tight at 120 Hz, fine at 90 Hz.
+- Gothic-Unity on the Quest 3 for comparison (2026-11-03): G2 at 120 Hz 98.8 FPS average in gameplay; Khorinis with a short object distance 115 FPS at 6.1 ms GPU, with a long one at night 74-84 FPS at 9.2 ms.
+- To confirm on the headset: `tools/quest-bench.sh 30 --hz=120 --game=2 --ai=true --object-far=80 --pfx-far=40 --anim-far=80 --occluder-area=2 --msaa=2`.
+
 ## 2026-11-07 - Frame spikes: garbage from ZenKit's external calls
 
 - With the GPU at 71-74% at 120 Hz, 6-8 frames per second still missed. Logging what long frames had in common: 2-16 ms of AI time in a single script call.

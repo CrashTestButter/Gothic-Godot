@@ -33,6 +33,7 @@ namespace GothicGodot.Spike
             AddChild(new PerfLog());
 
             var isXr = TryStartXr();
+            ApplyRenderOptions();
             var watch = Stopwatch.StartNew();
 
             var vfs = new Vfs();
@@ -376,6 +377,23 @@ namespace GothicGodot.Spike
             Log($"after loading: managed heap {before / 1048576} MB -> {GC.GetTotalMemory(true) / 1048576} MB");
         }
 
+        /// <summary>--msaa=0|2|4|8 on every platform, --novsync for desktop measurements.</summary>
+        private void ApplyRenderOptions()
+        {
+            var msaa = _args.GetInt("msaa", -1);
+            if (msaa >= 0)
+                GetViewport().Msaa3D = msaa switch
+                {
+                    0 => Viewport.Msaa.Disabled,
+                    2 => Viewport.Msaa.Msaa2X,
+                    8 => Viewport.Msaa.Msaa8X,
+                    _ => Viewport.Msaa.Msaa4X
+                };
+            Log($"MSAA {GetViewport().Msaa3D}");
+            if (_args.Get("novsync", "false") == "true")
+                DisplayServer.WindowSetVsyncMode(DisplayServer.VSyncMode.Disabled);
+        }
+
         private bool TryStartXr()
         {
             var xr = XRServer.FindInterface("OpenXR");
@@ -397,16 +415,7 @@ namespace GothicGodot.Spike
                     $"rates {string.Join("/", openXr.GetAvailableDisplayRefreshRates())}");
             }
 
-            var msaa = _args.GetInt("msaa", -1);
-            if (msaa >= 0)
-                GetViewport().Msaa3D = msaa switch
-                {
-                    0 => Viewport.Msaa.Disabled,
-                    2 => Viewport.Msaa.Msaa2X,
-                    8 => Viewport.Msaa.Msaa8X,
-                    _ => Viewport.Msaa.Msaa4X
-                };
-            Log($"MSAA {GetViewport().Msaa3D}");
+
             return true;
         }
 
