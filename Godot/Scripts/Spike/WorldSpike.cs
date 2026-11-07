@@ -42,6 +42,8 @@ namespace GothicGodot.Spike
         public override void _Ready()
         {
             _args = new SpikeArgs();
+            // The time of day's outdoor light, one value for every shader (also the ones made after loading).
+            RenderingServer.GlobalShaderParameterAdd("sky_light", RenderingServer.GlobalShaderParameterType.Float, 1.0f);
             NativeLibraries.Register();
             AddChild(new GothicGodot.Port.GothicCoreHost { Name = "GothicCore" });
             AddChild(new PerfLog());
@@ -271,8 +273,7 @@ namespace GothicGodot.Spike
             _lastDaylight = day;
             // Gothic's baked light stays; outdoors gets darker at night like the engine's sky light (a third at night).
             var skyLight = Mathf.Lerp(0.35f, 1f, day);
-            foreach (var material in _materials)
-                material.SetShaderParameter("sky_light", skyLight);
+            RenderingServer.GlobalShaderParameterSet("sky_light", skyLight);
             _sky.SkyTopColor = _nightSkyTop.Lerp(_daySkyTop, day);
             _sky.SkyHorizonColor = _nightSkyHorizon.Lerp(_daySkyHorizon, day);
             _sky.GroundHorizonColor = _sky.SkyHorizonColor * 0.8f;
@@ -355,6 +356,26 @@ namespace GothicGodot.Spike
             var root = new Node3D { Name = "Items" };
             AddChild(root);
             _vobs.BuildItems(root, materials[3], materials[4], instance => ItemOf(instance)?.Visual, far);
+            // The scripts' own items (G2's startup puts plants on freepoints), now and later.
+            var inserted = 0;
+            if (_ai != null)
+            {
+                foreach (var (instance, position) in _ai.InsertedItems)
+                    if (CreateItem(instance, new Transform3D(Basis.Identity, position)) is { } item)
+                    {
+                        root.AddChild(item);
+                        inserted++;
+                    }
+
+                _ai.ItemInserted += (instance, position) =>
+                {
+                    if (CreateItem(instance, new Transform3D(Basis.Identity, position)) is { } item)
+                        root.AddChild(item);
+                };
+            }
+
+            if (inserted > 0)
+                Log($"items from the scripts: {inserted} of {_ai.InsertedItems.Count}");
             Log($"items built in {watch.ElapsedMilliseconds} ms: {_vobs.ItemsBuilt} of {_vobs.ItemCount} grabbable");
         }
 

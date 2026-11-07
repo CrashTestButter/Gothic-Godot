@@ -2,6 +2,12 @@
 
 Newest first.
 
+## 2026-11-07 - Textures after loading, the scripts' items
+
+- The texture array is uploaded once, so a surface whose texture first shows up later (a reward item, an item nobody carried at load) got a wrong layer. Such surfaces now get a material of their own with just that texture (one more draw call each, but only for those). `GOTHIC_LATE_TEXTURES=1` sends every item made after loading down that path to check it: the ore nugget and the potion render the same.
+- The time of day's outdoor light is a global shader value now (`sky_light`), so materials made later follow it too.
+- Wld_InsertItem: the scripts' own items at a freepoint or waypoint (G2's startup puts 130 plants and the like into the world: 129 built, one has no mesh), and later ones at once.
+
 ## 2026-11-07 - AI cost with fights and freepoints
 
 - G2 Khorinis, 239 scripted NPCs, desktop: AI 16-25 ms per second (0.27-0.4 ms per frame) of which the VM is only 3-4; G1 Old Camp 10-15. Measured by section: perception checks 1.8, actions 5, script calls 4 ms per second; the rest is spread thin over the NPCs each frame and noisy between runs.

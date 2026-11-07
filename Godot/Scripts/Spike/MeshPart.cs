@@ -12,6 +12,7 @@ namespace GothicGodot.Spike
     {
         public WorldChunkBuilder.Kind Kind;
         public int Layer;
+        public string Texture;
         public Vector3[] Positions;
         public Vector3[] Normals;
         public Vector2[] Uvs;
@@ -50,6 +51,7 @@ namespace GothicGodot.Spike
                 var wedges = subMesh.Wedges;
                 var part = new MeshPart
                 {
+                    Texture = textureName != null ? textureName(texture) : texture,
                     Kind = hasAlpha || mrm.AlphaTest ? WorldChunkBuilder.Kind.AlphaTest : WorldChunkBuilder.Kind.Opaque,
                     Layer = layer,
                     Positions = new Vector3[wedges.Count],

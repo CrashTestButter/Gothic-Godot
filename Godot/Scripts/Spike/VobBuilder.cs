@@ -228,9 +228,37 @@ namespace GothicGodot.Spike
             return result;
         }
 
+        private readonly Dictionary<(string, bool), ShaderMaterial> _singleMaterials = new();
+        private Shader _singleOpaque;
+        private Shader _singleAlpha;
+
+        /// <summary>A surface whose texture came after the array was built gets a material with that texture alone.</summary>
+        private Material GetMaterial(MeshPart part, Material opaque, Material alpha)
+        {
+            var isAlpha = part.Kind == WorldChunkBuilder.Kind.AlphaTest;
+            // GOTHIC_LATE_TEXTURES=1: every item made after loading takes this path (checks it without a new texture).
+            var isForced = _textures.BuiltLayerCount != int.MaxValue && OS.GetEnvironment("GOTHIC_LATE_TEXTURES") == "1";
+            if (part.Layer < _textures.BuiltLayerCount && !isForced)
+                return isAlpha ? alpha : opaque;
+            if (_singleMaterials.TryGetValue((part.Texture, isAlpha), out var cached))
+                return cached;
+            _singleOpaque ??= GD.Load<Shader>("res://Shaders/vob_single_opaque.gdshader");
+            _singleAlpha ??= GD.Load<Shader>("res://Shaders/vob_single_alpha.gdshader");
+            var material = new ShaderMaterial { Shader = isAlpha ? _singleAlpha : _singleOpaque };
+            material.SetShaderParameter("albedo_texture", _textures.GetSingle(part.Texture));
+            _singleMaterials[(part.Texture, isAlpha)] = material;
+            LateTextureCount++;
+            GD.Print($"[Items] {part.Texture} came after the texture array: a material of its own");
+            return material;
+        }
+
+        /// <summary>Textures that arrived after the array was built (each one a material of its own).</summary>
+        public int LateTextureCount { get; private set; }
+
         private ArrayMesh GetArrayMesh(string visual, List<MeshPart> parts, Material opaque, Material alpha)
         {
-            if (_meshes.TryGetValue(visual, out var cached))
+            var isForcedLate = _textures.BuiltLayerCount != int.MaxValue && OS.GetEnvironment("GOTHIC_LATE_TEXTURES") == "1";
+            if (_meshes.TryGetValue(visual, out var cached) && !isForcedLate)
                 return cached;
 
             var mesh = new ArrayMesh();
@@ -247,8 +275,7 @@ namespace GothicGodot.Spike
                 arrays[(int)Mesh.ArrayType.TexUV2] = layers;
                 arrays[(int)Mesh.ArrayType.Index] = part.Indices;
                 mesh.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, arrays);
-                mesh.SurfaceSetMaterial(mesh.GetSurfaceCount() - 1,
-                    part.Kind == WorldChunkBuilder.Kind.AlphaTest ? alpha : opaque);
+                mesh.SurfaceSetMaterial(mesh.GetSurfaceCount() - 1, GetMaterial(part, opaque, alpha));
             }
 
             _meshes[visual] = mesh;

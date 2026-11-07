@@ -69,6 +69,12 @@ namespace GothicGodot.Spike
         /// <summary>Tests: every state call of this NPC is logged ([Trace]).</summary>
         public GothicNpc TracedNpc { get; set; }
         public GothicFight Fight { get; private set; }
+
+        /// <summary>Items the scripts put into the world (Wld_InsertItem): instance and place.</summary>
+        public List<(string Instance, Vector3 Position)> InsertedItems { get; } = new();
+
+        /// <summary>A script inserted an item (after loading the world builder makes it at once).</summary>
+        public event Action<string, Vector3> ItemInserted;
         public double Time => _time;
 
         /// <summary>The scripts' sounds (Snd_Play, Snd_Play3d) play here once it is set.</summary>
@@ -1127,6 +1133,22 @@ namespace GothicGodot.Spike
             {
                 _externals++;
                 Insert(instance, waypoint);
+            }));
+            // At a freepoint or a waypoint by name, like the engine.
+            _vm.RegisterExternal("Wld_InsertItem", (DaedalusVm.ExternalFuncV<int, string>)((item, spawn) =>
+            {
+                _externals++;
+                var name = _vm.GetSymbolByIndex(item)?.Name;
+                var point = _freePoints.Find(p => string.Equals(p.Name, spawn, StringComparison.OrdinalIgnoreCase));
+                Vector3 position;
+                if (point != null)
+                    position = point.Position;
+                else if (!_waypoints.TryGetValue(spawn ?? "", out position))
+                    return;
+                if (name == null)
+                    return;
+                InsertedItems.Add((name, position));
+                ItemInserted?.Invoke(name, position);
             }));
             _vm.RegisterExternal("Mdl_SetVisual", (DaedalusVm.ExternalFuncV<NpcInstance, string>)((npc, visual) =>
             {

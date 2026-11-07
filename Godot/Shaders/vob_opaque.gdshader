@@ -7,7 +7,7 @@ uniform sampler2DArray albedo_array : source_color, filter_linear_mipmap, repeat
 uniform vec3 sun_direction = vec3(0.4, 0.8, 0.3);
 instance uniform vec4 tint : source_color = vec4(0.6, 0.6, 0.6, 1.0);
 // Daylight for things standing outdoors (tint.a = 1 from the ground below them).
-uniform float sky_light = 1.0;
+global uniform float sky_light;
 
 varying flat float layer;
 varying float shade;

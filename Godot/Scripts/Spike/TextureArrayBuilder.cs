@@ -19,6 +19,27 @@ namespace GothicGodot.Spike
         private readonly Godot.Collections.Array<Image> _images = new();
 
         public int LayerCount => _images.Count;
+
+        /// <summary>Layers that are in the built array; later ones (textures first seen after loading) are not.</summary>
+        public int BuiltLayerCount { get; private set; } = int.MaxValue;
+
+        private readonly Dictionary<string, ImageTexture> _singles = new(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>
+        /// A texture of its own, for surfaces made after the array was built (items from the scripts, rewards): the
+        /// array has a fixed number of layers once uploaded.
+        /// </summary>
+        public ImageTexture GetSingle(string textureName)
+        {
+            if (string.IsNullOrEmpty(textureName))
+                return null;
+            if (_singles.TryGetValue(textureName, out var cached))
+                return cached;
+            var layer = GetLayer(textureName, out _);
+            var texture = layer > 0 && layer < _images.Count ? ImageTexture.CreateFromImage(_images[layer]) : null;
+            _singles[textureName] = texture;
+            return texture;
+        }
         public int MissingCount { get; private set; }
         public List<string> MissingNames { get; } = new();
 
@@ -87,6 +108,7 @@ namespace GothicGodot.Spike
 
         public Texture2DArray Build()
         {
+            BuiltLayerCount = _images.Count;
             var array = new Texture2DArray();
             array.CreateFromImages(_images);
             return array;
