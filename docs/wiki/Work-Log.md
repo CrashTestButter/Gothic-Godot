@@ -2,6 +2,15 @@
 
 Newest first.
 
+## 2026-11-07 - Music: Gothic's DirectMusic score
+
+- Gothic's themes (C_MUSICTHEME in MUSIC.DAT) through dmusic, like Gothic-Unity's music: the music zone the hero is in (the zone playing stays while he is inside, else the last zone containing him in world order, else the world's default zone), day 4:00-21:00 or night (night falls back to day), transitions with the theme's embellishment and timing.
+- dmusic renders on its own thread into an AudioStreamGenerator (chunks of 1024 frames, 0.2 s buffer), like Unity's audio callback in Gothic-Unity: nothing on the main thread. Desktop cost 18-24 ms per second on the music thread, no underruns after loading.
+- Tested headless (`--shots` through the zones, `--record-audio=file.wav` saves what the master bus mixed): Ore Barons (default theme), Old Camp `oc_day_std.sgt`, Bandit camp `ban_day_std.sgt`, New Camp `nci_day_std.sgt`; the recording has music (RMS 0.02-0.06).
+- **dmusic-cs bug**: the first zone change after a garbage collection ended the process - the loader's resolver delegate had been collected. Fixed in a dmusic-cs patch, see [[Upstream-Forks]]; possibly behind some of Gothic-Unity's music crashes in the editor (Mono), not on the Quest (IL2CPP).
+- Headless renders mix sound with Godot's Dummy driver now (`tools/render.sh`, `AUDIO_DRIVER=PulseAudio` to hear it); before, test runs played voices on the machine's speakers.
+- Not in it yet: fight and threat music (needs the fight AI), reverb from the theme, volume from Gothic.ini, sound effects and ambient sounds.
+
 ## 2026-11-07 - Dialogs: choices, voices, subtitles
 
 ![Stone's dialog options (G1)](images/dialog-stone-options.png)

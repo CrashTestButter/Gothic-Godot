@@ -26,6 +26,7 @@ namespace GothicGodot.Spike
         private bool _isShotPending;
         private HumanCrowd _crowd;
         private GothicAi _ai;
+        private AudioEffectRecord _recorder;
 
         public override void _Ready()
         {
@@ -159,6 +160,24 @@ namespace GothicGodot.Spike
             else
                 CreateRig(isXr, GetCameraStart(world));
 
+            // --record-audio=file.wav: what the master bus mixed, saved on quit (checks sound in headless runs).
+            if (!string.IsNullOrEmpty(_args.Get("record-audio", "")))
+            {
+                _recorder = new AudioEffectRecord();
+                AudioServer.AddBusEffect(0, _recorder);
+                _recorder.SetRecordingActive(true);
+            }
+
+            if (_args.Get("music", "true") == "true")
+            {
+                var start = GetCameraStart(world);
+                var music = new GothicGodot.Audio.GothicMusic { Name = "Music" };
+                AddChild(music);
+                music.Init(vfs, world, () => _camera != null ? _camera.GlobalPosition : start, _args.GetInt("hour", 12),
+                    _args.GetFloat("music-volume", 0.33f));
+                Log($"music in {watch.ElapsedMilliseconds} ms");
+            }
+
             // Loading leaves the cached ZenKit world and the builders' data as garbage (over 1 GB). Collect and
             // compact it now: a big heap makes every later collection slower (frame spikes on the Quest).
             // Deferred: inside _Ready the locals (world, mesh) still keep it alive.
@@ -191,6 +210,18 @@ namespace GothicGodot.Spike
 
             if (_args.QuitAfterSeconds > 0 && _time > _args.QuitAfterSeconds)
                 GetTree().Quit();
+        }
+
+        public override void _Notification(int what)
+        {
+            if (what != NotificationWMCloseRequest && what != NotificationPredelete || _recorder == null)
+                return;
+            var recording = _recorder.GetRecording();
+            _recorder.SetRecordingActive(false);
+            var path = _args.Get("record-audio", "");
+            recording?.SaveToWav(path);
+            Log($"audio recorded to {path}: {recording?.GetLength():F1} s");
+            _recorder = null;
         }
 
         private void BuildParticles(Vfs vfs, ZenKit.World world, Stopwatch watch)

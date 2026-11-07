@@ -143,3 +143,6 @@ OpenGothic
 # LinuxXR copies its native plug-in here on every Linux Editor start (Linux only, never in builds) - see the package.
 /[Aa]ssets/LinuxXR/
 /[Aa]ssets/LinuxXR.meta
+
+# Gothic-Godot: patches for forked upstream projects (ZenKitCS above is the symlink, not these)
+!forks/**

@@ -20,6 +20,9 @@
     <Reference Include="ZenKit">
       <HintPath>lib/ZenKit.dll</HintPath>
     </Reference>
+    <Reference Include="DirectMusic">
+      <HintPath>lib/DirectMusic.dll</HintPath>
+    </Reference>
   </ItemGroup>
 
   <!-- Native libraries go next to the published assemblies; Godot's export puts every .so of the publish output
@@ -42,6 +45,7 @@
     <TrimmerRootAssembly Include="GodotSharp" />
     <TrimmerRootAssembly Include="$(TargetName)" />
     <TrimmerRootAssembly Include="ZenKit" />
+    <TrimmerRootAssembly Include="DirectMusic" />
     <LinkerArg Include="-Wl,--undefined-version" />
   </ItemGroup>
 </Project>

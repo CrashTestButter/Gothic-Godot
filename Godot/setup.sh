@@ -43,4 +43,19 @@ if [ "${USE_ZENKITCS_FORK:-1}" = 1 ] && command -v dotnet >/dev/null; then
     cp "$CACHE"/ZenKitCS/ZenKit/bin/Release/netstandard2.1/*/ZenKit.dll lib/ZenKit.dll
     git -C "$CACHE/ZenKitCS" checkout -q -f "$ZENKITCS_REF"
 fi
+# dmusic-cs with our patches (forks/dmusic-cs/*.patch): the loader's resolver callback stays alive.
+DMUSICCS_REF="${DMUSICCS_REF:-aab497eeb5f8be7b1e342d0a98617ad310c634cc}"
+if [ "${USE_DMUSICCS_FORK:-1}" = 1 ] && command -v dotnet >/dev/null; then
+    if [ ! -d "$CACHE/dmusic-cs" ]; then
+        git clone -q https://github.com/GothicKit/dmusic-cs.git "$CACHE/dmusic-cs"
+    fi
+    git -C "$CACHE/dmusic-cs" checkout -q -f "$DMUSICCS_REF"
+    for patch in ../forks/dmusic-cs/*.patch; do
+        git -C "$CACHE/dmusic-cs" apply "$(realpath "$patch")"
+    done
+    dotnet build -c Release -nologo -v q "$CACHE/dmusic-cs/DirectMusic/DirectMusic.csproj"
+    cp lib/DirectMusic.dll lib/DirectMusic.upstream.dll
+    cp "$CACHE"/dmusic-cs/DirectMusic/bin/Release/netstandard2.1/*/DirectMusic.dll lib/DirectMusic.dll
+    git -C "$CACHE/dmusic-cs" checkout -q -f "$DMUSICCS_REF"
+fi
 echo "Done: lib/ and addons/godotopenxrvendors/"

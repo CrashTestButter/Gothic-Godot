@@ -21,6 +21,7 @@ namespace GothicGodot.Spike
             _isRegistered = true;
 
             NativeLibrary.SetDllImportResolver(typeof(ZenKit.Vfs).Assembly, Resolve);
+            NativeLibrary.SetDllImportResolver(typeof(DirectMusic.Performance).Assembly, Resolve);
         }
 
         private static IntPtr Resolve(string name, Assembly assembly, DllImportSearchPath? searchPath)

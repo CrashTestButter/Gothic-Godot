@@ -1,0 +1,293 @@
+From 58fc8d911b6532fe0a9281cff44a615e2324fe5b Mon Sep 17 00:00:00 2001
+From: Todi <4650690+CrashTestButter@users.noreply.github.com>
+Date: Sat, 7 Nov 2026 13:22:02 +0100
+Subject: [PATCH] perf(DaedalusVm): reuse wrappers in external callbacks, no
+ boxing in Push/Pop
+
+Every external call created a new managed DaedalusVm wrapper (with a list
+and three delegates), a DaedalusSymbol for default externals and a new
+finalizable DaedalusInstance for every instance parameter, and boxed
+int/float/bool values. With ~3500 externals per second (134 scripted NPCs
+in Gothic 1's Old Camp) that was ~1.5 MB/s of garbage and a gen0+gen1
+collection every 1-4 s (5 ms on desktop CoreCLR, 10-16 ms on a Quest 3).
+
+- Callback contexts keep the managed VM (and a symbol cache), the handlers
+  allocate nothing.
+- Instances with UserData come back as the wrapper the UserData was set on;
+  the extra native reference from the pop is released at once.
+- Push/Pop use typed delegates created once per T instead of boxing.
+
+Allocations inside script calls drop from ~1500 KB/s to ~10 KB/s.
+---
+ ZenKit/DaedalusInstance.cs |  27 +++++-
+ ZenKit/DaedalusVm.cs       | 164 ++++++++++++++++++++++++++-----------
+ 2 files changed, 141 insertions(+), 50 deletions(-)
+
+diff --git a/ZenKit/DaedalusInstance.cs b/ZenKit/DaedalusInstance.cs
+index bea3bd7..6048912 100644
+--- a/ZenKit/DaedalusInstance.cs
++++ b/ZenKit/DaedalusInstance.cs
+@@ -61,14 +61,39 @@ namespace ZenKit
+ 			{
+ 				// TODO: This leaks a handle.
+ 				var handle = GCHandle.Alloc(value, GCHandleType.Weak);
+-				Native.ZkDaedalusInstance_setUserPointer(Handle, GCHandle.ToIntPtr(handle));
++				var userPointer = GCHandle.ToIntPtr(handle);
++				Native.ZkDaedalusInstance_setUserPointer(Handle, userPointer);
++				lock (ByUserPointer)
++					ByUserPointer[userPointer] = new WeakReference<DaedalusInstance>(this);
+ 			}
+ 		}
+ 
++		/// <summary>
++		/// The wrapper an instance got its UserData on, by user pointer. The VM hands out a new native reference for
++		/// every popped instance (externals' instance parameters, GlobalSelf, ...); for instances with UserData the
++		/// existing wrapper is returned and the new reference released at once, instead of a new finalizable
++		/// wrapper per call.
++		/// </summary>
++		private static readonly Dictionary<IntPtr, WeakReference<DaedalusInstance>> ByUserPointer =
++			new Dictionary<IntPtr, WeakReference<DaedalusInstance>>();
++
+ 		public static DaedalusInstance? FromNative(UIntPtr handle)
+ 		{
+ 			if (handle == UIntPtr.Zero) return null;
+ 
++			var userPointer = Native.ZkDaedalusInstance_getUserPointer(handle);
++			if (userPointer != IntPtr.Zero)
++			{
++				lock (ByUserPointer)
++				{
++					if (ByUserPointer.TryGetValue(userPointer, out var weak) && weak.TryGetTarget(out var existing))
++					{
++						Native.ZkDaedalusInstance_release(handle);
++						return existing;
++					}
++				}
++			}
++
+ 			return Native.ZkDaedalusInstance_getType(handle) switch
+ 			{
+ 				DaedalusInstanceType.GuildValues => new GuildValuesInstance(handle),
+diff --git a/ZenKit/DaedalusVm.cs b/ZenKit/DaedalusVm.cs
+index a4a0f8b..28ab20e 100644
+--- a/ZenKit/DaedalusVm.cs
++++ b/ZenKit/DaedalusVm.cs
+@@ -365,7 +365,9 @@ namespace ZenKit
+ 
+ 		public void RegisterExternalDefault(ExternalDefaultFunction cb)
+ 		{
+-			var gcHandle = GCHandle.Alloc(cb);
++			// The context keeps this wrapper and a symbol cache, so a call allocates nothing (no new DaedalusVm and
++			// DaedalusSymbol wrappers per call, which made scripts with many externals churn the garbage collector).
++			var gcHandle = GCHandle.Alloc(new DefaultExternalContext(this, cb));
+ 			_externalCallbacks.Add(gcHandle);
+ 			Native.ZkDaedalusVm_registerExternalDefault(Handle, _nativeExternalCallbackDefault,
+ 				GCHandle.ToIntPtr(gcHandle));
+@@ -373,7 +375,7 @@ namespace ZenKit
+ 		
+ 		public void SetAccessTrapCallback(AccessTrapCallback cb)
+ 		{
+-			var gcHandle = GCHandle.Alloc(cb);
++			var gcHandle = GCHandle.Alloc(new TrapContext(cb));
+ 			_externalCallbacks.Add(gcHandle);
+ 			Native.ZkDaedalusVm_setAccessTrapCallback(Handle, _nativeTrapCallback, GCHandle.ToIntPtr(gcHandle));
+ 		}
+@@ -962,50 +964,57 @@ namespace ZenKit
+ 
+ 		private void Push<T>(T value)
+ 		{
+-			switch (value)
+-			{
+-				case string v:
+-					Native.ZkDaedalusVm_pushString(Handle, v);
+-					break;
+-				case int v:
+-					Native.ZkDaedalusVm_pushInt(Handle, v);
+-					break;
+-				case bool v:
+-					Native.ZkDaedalusVm_pushInt(Handle, v ? 1 : 0);
+-					break;
+-				case float v:
+-					Native.ZkDaedalusVm_pushFloat(Handle, v);
+-					break;
+-				case DaedalusInstance v:
+-					Native.ZkDaedalusVm_pushInstance(Handle, v.Handle);
+-					break;
+-				case null:
+-					Native.ZkDaedalusVm_pushInstance(Handle, UIntPtr.Zero);
+-					break;
+-				default:
+-					throw new InvalidOperationException("Unsupported type: " + value?.GetType());
+-			}
++			Marshaller<T>.Push(this, value);
+ 		}
+ 
+ 		private T Pop<T>()
+ 		{
+-			if (typeof(T) == typeof(string))
+-				return (T)(object)(Native.ZkDaedalusVm_popString(Handle).MarshalAsString() ?? string.Empty);
+-			if (typeof(T) == typeof(int) || typeof(T) == typeof(bool))
+-				return (T)(object)Native.ZkDaedalusVm_popInt(Handle);
+-			if (typeof(T) == typeof(float)) return (T)(object)Native.ZkDaedalusVm_popFloat(Handle);
+-			if (typeof(T) == typeof(DaedalusInstance) || typeof(T).IsSubclassOf(typeof(DaedalusInstance)))
++			return Marshaller<T>.Pop(this);
++		}
++
++		/// <summary>
++		/// Typed push/pop per value type, created once per T: no boxing of int/float/bool on every external call
++		/// (the old switch on a generic value and the (T)(object) casts boxed on Mono).
++		/// </summary>
++		private static class Marshaller<T>
++		{
++			public static readonly Action<DaedalusVm, T> Push = CreatePush();
++			public static readonly Func<DaedalusVm, T> Pop = CreatePop();
++
++			private static Action<DaedalusVm, T> CreatePush()
+ 			{
+-				var ptr = Native.ZkDaedalusVm_popInstance(Handle);
+-				if (ptr == UIntPtr.Zero)
+-				{
+-					return (T)(object) null;
+-				}
+-				return (T)(object)DaedalusInstance.FromNative(ptr);
++				if (typeof(T) == typeof(int))
++					return (Action<DaedalusVm, T>)(object)new Action<DaedalusVm, int>((vm, v) => Native.ZkDaedalusVm_pushInt(vm.Handle, v));
++				if (typeof(T) == typeof(bool))
++					return (Action<DaedalusVm, T>)(object)new Action<DaedalusVm, bool>((vm, v) => Native.ZkDaedalusVm_pushInt(vm.Handle, v ? 1 : 0));
++				if (typeof(T) == typeof(float))
++					return (Action<DaedalusVm, T>)(object)new Action<DaedalusVm, float>((vm, v) => Native.ZkDaedalusVm_pushFloat(vm.Handle, v));
++				if (typeof(T) == typeof(string))
++					return (Action<DaedalusVm, T>)(object)new Action<DaedalusVm, string>((vm, v) => Native.ZkDaedalusVm_pushString(vm.Handle, v));
++				if (typeof(DaedalusInstance).IsAssignableFrom(typeof(T)))
++					return (vm, v) => Native.ZkDaedalusVm_pushInstance(vm.Handle, (v as DaedalusInstance)?.Handle ?? UIntPtr.Zero);
++				return (vm, v) => throw new InvalidOperationException("Unsupported type: " + typeof(T));
+ 			}
+-			if (typeof(T) == typeof(void)) return (T)new object();
+ 
+-			throw new InvalidOperationException("Unsupported type: " + typeof(T));
++			private static Func<DaedalusVm, T> CreatePop()
++			{
++				if (typeof(T) == typeof(int))
++					return (Func<DaedalusVm, T>)(object)new Func<DaedalusVm, int>(vm => Native.ZkDaedalusVm_popInt(vm.Handle));
++				if (typeof(T) == typeof(bool))
++					return (Func<DaedalusVm, T>)(object)new Func<DaedalusVm, bool>(vm => Native.ZkDaedalusVm_popInt(vm.Handle) != 0);
++				if (typeof(T) == typeof(float))
++					return (Func<DaedalusVm, T>)(object)new Func<DaedalusVm, float>(vm => Native.ZkDaedalusVm_popFloat(vm.Handle));
++				if (typeof(T) == typeof(string))
++					return (Func<DaedalusVm, T>)(object)new Func<DaedalusVm, string>(vm =>
++						Native.ZkDaedalusVm_popString(vm.Handle).MarshalAsString() ?? string.Empty);
++				if (typeof(DaedalusInstance).IsAssignableFrom(typeof(T)))
++					return vm =>
++					{
++						var ptr = Native.ZkDaedalusVm_popInstance(vm.Handle);
++						return ptr == UIntPtr.Zero ? default! : (T)(object)DaedalusInstance.FromNative(ptr)!;
++					};
++				return vm => throw new InvalidOperationException("Unsupported type: " + typeof(T));
++			}
+ 		}
+ 
+ 		public DaedalusSymbol PopReference(out int index, out DaedalusInstance? context)
+@@ -1025,7 +1034,7 @@ namespace ZenKit
+ 
+ 		private void RegisterExternalUnsafe(DaedalusSymbol sym, ExternalFunc cb)
+ 		{
+-			var gcHandle = GCHandle.Alloc(cb);
++			var gcHandle = GCHandle.Alloc(new ExternalContext(this, cb));
+ 			_externalCallbacks.Add(gcHandle);
+ 			Native.ZkDaedalusVm_registerExternal(Handle, sym.Handle, _nativeExternalCallback,
+ 				GCHandle.ToIntPtr(gcHandle));
+@@ -1045,25 +1054,82 @@ namespace ZenKit
+ 		[MonoPInvokeCallback]
+ 		private static void _nativeExternalCallbackHandler(IntPtr ctx, UIntPtr vm)
+ 		{
+-			var gcHandle = GCHandle.FromIntPtr(ctx);
+-			var cb = (ExternalFunc)gcHandle.Target;
+-			cb(new DaedalusVm(vm));
++			var context = (ExternalContext)GCHandle.FromIntPtr(ctx).Target;
++			context.Callback(context.GetVm(vm));
+ 		}
+ 
+ 		[MonoPInvokeCallback]
+ 		private static void _nativeExternalCallbackDefaultHandle(IntPtr ctx, UIntPtr vm, UIntPtr sym)
+ 		{
+-			var gcHandle = GCHandle.FromIntPtr(ctx);
+-			var cb = (ExternalDefaultFunction)gcHandle.Target;
+-			cb(new DaedalusVm(vm), new DaedalusSymbol(sym));
++			var context = (DefaultExternalContext)GCHandle.FromIntPtr(ctx).Target;
++			context.Callback(context.GetVm(vm), context.Symbols.Get(sym));
+ 		}
+ 
+ 		[MonoPInvokeCallback]
+ 		private static void _nativeTrapCallbackHandler(IntPtr ctx, UIntPtr sym)
+ 		{
+-			var gcHandle = GCHandle.FromIntPtr(ctx);
+-			var cb = (AccessTrapCallback)gcHandle.Target;
+-			cb(new DaedalusSymbol(sym));
++			var context = (TrapContext)GCHandle.FromIntPtr(ctx).Target;
++			context.Callback(context.Symbols.Get(sym));
++		}
++
++		/// <summary>
++		/// Symbol wrappers by native handle: symbols live as long as the script, so one wrapper each is enough.
++		/// </summary>
++		private sealed class SymbolCache
++		{
++			private readonly Dictionary<UIntPtr, DaedalusSymbol> _symbols = new Dictionary<UIntPtr, DaedalusSymbol>();
++
++			public DaedalusSymbol Get(UIntPtr handle)
++			{
++				if (!_symbols.TryGetValue(handle, out var symbol))
++				{
++					symbol = new DaedalusSymbol(handle);
++					_symbols[handle] = symbol;
++				}
++
++				return symbol;
++			}
++		}
++
++		private sealed class ExternalContext
++		{
++			private readonly DaedalusVm _vm;
++			public readonly ExternalFunc Callback;
++
++			public ExternalContext(DaedalusVm vm, ExternalFunc callback)
++			{
++				_vm = vm;
++				Callback = callback;
++			}
++
++			// The native VM calling back is the one the external was registered on; anything else gets a wrapper.
++			public DaedalusVm GetVm(UIntPtr handle) => _vm.Handle == handle ? _vm : new DaedalusVm(handle);
++		}
++
++		private sealed class DefaultExternalContext
++		{
++			private readonly DaedalusVm _vm;
++			public readonly ExternalDefaultFunction Callback;
++			public readonly SymbolCache Symbols = new SymbolCache();
++
++			public DefaultExternalContext(DaedalusVm vm, ExternalDefaultFunction callback)
++			{
++				_vm = vm;
++				Callback = callback;
++			}
++
++			public DaedalusVm GetVm(UIntPtr handle) => _vm.Handle == handle ? _vm : new DaedalusVm(handle);
++		}
++
++		private sealed class TrapContext
++		{
++			public readonly AccessTrapCallback Callback;
++			public readonly SymbolCache Symbols = new SymbolCache();
++
++			public TrapContext(AccessTrapCallback callback)
++			{
++				Callback = callback;
++			}
+ 		}
+ 
+ 		private delegate void ExternalFunc(DaedalusVm vm);
+-- 
+2.56.0
+
