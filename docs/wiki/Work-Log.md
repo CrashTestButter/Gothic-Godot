@@ -9,7 +9,7 @@ Newest first.
 | G2 start view, draw calls (Quest settings) | 431 | 240 |
 | Draw calls at the test spots (G1 / G2) | 138-402 / 291-454 | 98-291 / 200-284 (23-40% fewer) |
 | Surfaces per NPC (G1 / G2) | 5.1 / 5.4 | 2.0 / 1.7 |
-| G2 load from the cache | 2.9 s | 2.1 s |
+| G2 load from the cache | 2.9 s | 1.9 s |
 
 - NPCs: the body's sub-meshes (skin, armour parts) and the head go into one surface per material, the head skinned to the head bone instead of hanging on a BoneAttachment3D node - one draw call per NPC (two with alpha tested parts) and one node less to update per frame. Faces up close look the same. `--npc-draws=split` for the old way.
 - World cells 96 m instead of 64 m: G2's start view 397 -> 240 draw calls for 3% more triangles (419k instead of 408k); G1 267 -> 196 with the same triangles. 128 m would cut to 191 / 165 but draws 20% more triangles.
@@ -18,6 +18,7 @@ Newest first.
 - Profiled from the process's start (the runtime waits for dotnet-trace on a diagnostic port): merging the head into the body had made the load slower - every NPC's mesh re-read its body and head files (255 ms of ZenKit parsing, 230 ms of file lookups). Parsed files and lookups are cached per name now: NPC setup 990 -> 556 ms. And each late collision piece printed an owner warning with a C# stack capture (689 ms in all); the pieces now go straight to the physics server, one static body each with the world's collision body as their collider: 0.31 ms a piece, at most 0.94 ms (the first one 5 ms, once). **G2 cached load 2.5 -> 2.1 s.**
 - The sampling profiler is only right inside the load: after it, it credits whole frames to the managed callbacks (AI 2.7 s in a trace of a game running at 60 fps with 0.12 ms of AI per frame). Frame costs come from the stopwatches in the `[Ai]` and `[Perf]` lines.
 - What is left of G2's cached load (2.1 s): NPC setup 570 ms, 2311 item bodies 303 ms, reading the cached textures 187 ms (a quarter with ETC2), the world file 163 ms, 666 particle emitters 155 ms, chests 118 ms. Next: items and emitters made only when the player comes near.
+- Done: item bodies are made once the camera comes within 10 m of their draw distance (35 m), at most 8 a frame, nearest first; their meshes and textures still load at load time (the texture array has them). G2: 22 of 2331 item bodies at load, items 300 -> 96 ms. With a particle distance (the Quest's 40 m) the emitters work the same way (41 of 666 at load, the effect scripts and textures still at load). Once made, they stay. `--item-near=0` makes all of them at load. **G2 cached load 2.1 -> 1.9 s.**
 
 ## 2026-11-07 - Optimization round 2: world cache, ETC2 textures, draw calls
 

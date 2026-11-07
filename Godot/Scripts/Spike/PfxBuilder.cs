@@ -42,6 +42,9 @@ namespace GothicGodot.Spike
                 (byte)(DaedalusExecutionFlags.AllowNullInstanceAccess | DaedalusExecutionFlags.IgnoreConstSpecifier));
         }
 
+        /// <summary>Reads the effect now (script instance, textures), for an emitter made later.</summary>
+        public bool Prepare(string visual) => GetTemplate(visual) != null;
+
         public void Add(string visual, Transform3D transform, Node3D parent)
         {
             var template = GetTemplate(visual);

@@ -48,6 +48,8 @@ namespace GothicGodot.Interaction
             {
                 case 0 when _time > 2:
                     var spot = Vector3.Zero;
+                    // Items further away are made when the camera comes near; the test may pick one of them.
+                    GothicGodot.Spike.NearSpawner.MakeNear(_player.GlobalPosition, 150f);
                     _item = _items?.GetChildren().OfType<WorldItem>()
                         .OrderBy(i => i.GlobalPosition.DistanceSquaredTo(_player.GlobalPosition))
                         .Take(200)
