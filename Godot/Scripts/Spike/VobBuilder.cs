@@ -77,6 +77,9 @@ namespace GothicGodot.Spike
 
                     chunks.AddObject(transform.Origin, part.Kind, positions, normals, part.Uvs, part.Layer, colors,
                         part.Indices);
+                    // Gothic lets only objects with cdStatic collide (fences, barrels, mobs - not grass or bushes).
+                    if (vob.CdStatic && part.Kind == WorldChunkBuilder.Kind.Opaque)
+                        chunks.AddObjectCollision(transform.Origin, positions, part.Indices);
                 }
             });
         }

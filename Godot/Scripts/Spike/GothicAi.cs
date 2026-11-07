@@ -57,6 +57,15 @@ namespace GothicGodot.Spike
 
         public int Count => _npcs.Count;
 
+        /// <summary>The player becomes the hero the NPCs perceive (instead of the fixed hero position).</summary>
+        public void SetHero(Node3D player)
+        {
+            if (_hero == null)
+                return;
+            _hero.Root.QueueFree();
+            _hero.Root = player;
+        }
+
         public void Init(Vfs vfs, HumanFactory factory, ZenKit.World world, GroundLightSampler light, int hour,
             Vector3 heroPosition, float radius, string startupFunction)
         {

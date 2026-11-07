@@ -169,6 +169,18 @@ namespace GothicGodot.Spike
 
         public int CollisionTriangleCount { get; private set; }
 
+        // Objects Gothic lets collide (cdStatic), per cell: world-space triangle corners.
+        private readonly Dictionary<(int X, int Z), List<Vector3>> _objectCollision = new();
+
+        public void AddObjectCollision(Vector3 origin, Vector3[] positions, int[] indices)
+        {
+            var key = ((int)Math.Floor(origin.X / _cellSize), (int)Math.Floor(origin.Z / _cellSize));
+            if (!_objectCollision.TryGetValue(key, out var faces))
+                _objectCollision[key] = faces = new List<Vector3>();
+            foreach (var index in indices)
+                faces.Add(positions[index]);
+        }
+
         /// <summary>
         /// World triangles at least this big (m²) become occluders per cell (0 = no occlusion culling): walls,
         /// palisades, terrain - what hides the camp behind it.
@@ -258,8 +270,20 @@ namespace GothicGodot.Spike
                 TriangleCount += chunk.Indices.Count / 3;
             }
 
+            if (body != null)
+            {
+                foreach (var faces in _objectCollision.Values)
+                {
+                    var shape = new ConcavePolygonShape3D { BackfaceCollision = true };
+                    shape.SetFaces(faces.ToArray());
+                    body.AddChild(new CollisionShape3D { Shape = shape });
+                    CollisionTriangleCount += faces.Count / 3;
+                }
+            }
+
             _chunks.Clear();
             _objectChunks.Clear();
+            _objectCollision.Clear();
         }
 
         private void AddOccluder(Node3D parent, Chunk chunk, string name)

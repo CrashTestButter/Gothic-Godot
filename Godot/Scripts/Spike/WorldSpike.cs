@@ -25,11 +25,13 @@ namespace GothicGodot.Spike
         private double _shotTime;
         private bool _isShotPending;
         private HumanCrowd _crowd;
+        private GothicAi _ai;
 
         public override void _Ready()
         {
             _args = new SpikeArgs();
             NativeLibraries.Register();
+            AddChild(new GothicGodot.Port.GothicCoreHost { Name = "GothicCore" });
             AddChild(new PerfLog());
 
             var isXr = TryStartXr();
@@ -112,6 +114,7 @@ namespace GothicGodot.Spike
                 var ai = new GothicAi { Name = "GothicAi", BoneMode = _args.Get("bone-mode", "split"),
                     AnimationFar = _args.GetFloat("anim-far", 0f) };
                 AddChild(ai);
+                _ai = ai;
                 ai.Init(vfs, humans, world, groundLight, _args.GetInt("hour", 12), GetCameraStart(world),
                     _args.GetFloat("ai-radius", 150f),
                     _args.Get("startup", _args.IsGothic2 ? "STARTUP_NEWWORLD" : "STARTUP_OLDCAMP"));
@@ -149,7 +152,10 @@ namespace GothicGodot.Spike
             Log($"texture array {_args.SliceSize}px uploaded in {watch.ElapsedMilliseconds} ms");
 
             CreateEnvironment();
-            CreateRig(isXr, GetCameraStart(world));
+            if (_args.Get("player", "false") == "true")
+                CreatePlayer(isXr, GetCameraStart(world));
+            else
+                CreateRig(isXr, GetCameraStart(world));
 
             // Loading leaves the cached ZenKit world and the builders' data as garbage (over 1 GB). Collect and
             // compact it now: a big heap makes every later collection slower (frame spikes on the Quest).
@@ -459,6 +465,19 @@ namespace GothicGodot.Spike
 
             var center = ring.Aggregate(Vector3.Zero, (sum, p) => sum + p) / ring.Count;
             return center;
+        }
+
+        /// <summary>The playable player instead of the benchmark rig: walks on the world, the AI sees it as the hero.</summary>
+        private void CreatePlayer(bool isXr, Vector3 position)
+        {
+            var player = new GothicGodot.Player.GothicPlayer { Name = "Player" };
+            AddChild(player);
+            player.GlobalPosition = position;
+            player.Setup(isXr, _args.IsGothic2 ? 50f : 45f, _args.GetFloat("far", isXr ? 600f : 1500f),
+                _args.GetFloat("walk-test", 0f));
+            player.Rotation = new Vector3(0, Mathf.DegToRad(_args.GetFloat("yaw", 0f)), 0);
+            _ai?.SetHero(player);
+            _camera = player.Camera;
         }
 
         private void CreateRig(bool isXr, Vector3 position)
