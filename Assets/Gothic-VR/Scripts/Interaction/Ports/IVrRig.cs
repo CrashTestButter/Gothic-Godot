@@ -39,6 +39,11 @@ namespace Gothic.VR.Interaction.Ports
         bool IsGrounded { get; }
         bool IsClimbing { get; }
 
+        /// <summary>
+        /// Crouched with the crouch button or by the player's own head height - the hero sneaks (if he can).
+        /// </summary>
+        bool IsCrouching => false;
+
         bool MovementEnabled { get; set; }
         bool TurnEnabled { get; set; }
         bool TeleportEnabled { get; set; }
@@ -107,6 +112,15 @@ namespace Gothic.VR.Interaction.Ports
         /// Default: ignored, for backends without (HVR).
         /// </summary>
         void SetLedgeHandler(IVrLedgeHandler handler)
+        {
+        }
+
+        /// <summary>
+        /// Holds the camera at this height in m above the floor (the hero lying on the ground), null ends it. The
+        /// camera jumps there in the next frame, so it's set behind a fade. Head tracking keeps working on top.
+        /// Default: not supported, the camera stays.
+        /// </summary>
+        void SetEyeHeightOverride(float? meters)
         {
         }
     }

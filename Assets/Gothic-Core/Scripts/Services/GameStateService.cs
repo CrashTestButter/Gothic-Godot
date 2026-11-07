@@ -63,6 +63,9 @@ namespace Gothic.Core.Services
         // name counts.
         public readonly Dictionary<string, VobContainer> VobsContainer = new();
 
+        // zCEarthquake: the world shakes when it is triggered.
+        public readonly Dictionary<string, VobContainer> VobsEarthquake = new();
+
         public int GuildHumanCount;
         public int GuildCount;
         public int[] GuildAttitudes;
@@ -137,6 +140,9 @@ namespace Gothic.Core.Services
                 case VirtualObjectType.zCMessageFilter:
                     VobsMessageFilter[name.ToUpperInvariant()] = container;
                     break;
+                case VirtualObjectType.zCEarthquake:
+                    VobsEarthquake[name.ToUpper()] = container;
+                    break;
                 default:
                     return;
             }
@@ -157,6 +163,7 @@ namespace Gothic.Core.Services
             VobsMoverController.Clear();
             VobsMessageFilter.Clear();
             VobsContainer.Clear();
+            VobsEarthquake.Clear();
         }
     }
 }

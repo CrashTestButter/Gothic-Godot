@@ -10,6 +10,9 @@ using Gothic.Core.Manager;
 using Gothic.Core.Models.Vm;
 using Gothic.Core.Services.Caches;
 using Gothic.Core.Services.World;
+using Gothic.Core.Services.Npc;
+using Gothic.VR.Interaction.Components;
+using Gothic.VR.Services;
 using JetBrains.Annotations;
 using Reflex.Attributes;
 using UnityEngine;
@@ -32,6 +35,9 @@ namespace Gothic.VR.Adapters.Vob.VobItem
         [Inject] private readonly VmCacheService _vmCacheService;
         [Inject] private readonly ResourceCacheService _resourceCacheService;
         [Inject] private readonly SaveGameService _saveGameService;
+        [Inject] private readonly NpcService _npcService;
+        [Inject] private readonly NpcInventoryService _npcInventoryService;
+        [Inject] private readonly VRPlayerService _vrPlayerService;
 
         
         // Do not eat them twice during destroy time.
@@ -49,6 +55,8 @@ namespace Gothic.VR.Adapters.Vob.VobItem
                 return;
 
             Logger.Log($"Eating item: {go.name}", LogCat.VR);
+            // Its use function does what it's for: a potion heals, food feeds.
+            _npcInventoryService.UseItem(_npcService.GetHeroContainer(), item);
 
             // Defines after which time period the object will be destroyed in hand.
             var destroyTime = 1f;
@@ -72,7 +80,7 @@ namespace Gothic.VR.Adapters.Vob.VobItem
                 _saveGameService.RemoveVobFromWorld(vobLoaderComp.Container.Vob);
             }
 
-            StartCoroutine(ConsumeObject(rootGo, clip, destroyTime));
+            StartCoroutine(ConsumeObject(go, rootGo, clip, destroyTime));
         }
 
         private bool TryGetItemToEat(GameObject go, out ItemInstance item)
@@ -86,7 +94,16 @@ namespace Gothic.VR.Adapters.Vob.VobItem
             if (mainFlag != VmGothicEnums.ItemFlags.ItemKatFood && mainFlag != VmGothicEnums.ItemFlags.ItemKatPotions)
                 return false;
 
-            return true;
+            // Only what's held in a hand: items in the backpack or a loot panel sit in sockets and can pass the mouth
+            // when those open near the head (found on BoroBongo's branch).
+            var interactable = go.GetComponentInParent<VrInteractable>();
+            return interactable == null || IsInHand(interactable);
+        }
+
+        private bool IsInHand(VrInteractable interactable)
+        {
+            return _vrPlayerService.GrabbedItemLeft == interactable.gameObject ||
+                   _vrPlayerService.GrabbedItemRight == interactable.gameObject;
         }
 
         private bool TryExtractSfx(ItemInstance item, out AudioClip clip)
@@ -130,8 +147,14 @@ namespace Gothic.VR.Adapters.Vob.VobItem
             return true;
         }
 
-        // FIXME- Handle also inventory state in the future. Currently only mesh is gone, but not object from save game and inventory.
-        private IEnumerator ConsumeObject(GameObject go, [CanBeNull] AudioClip clip, float destroyDelay)
+        /// <summary>
+        /// One bite uses one item (VRPlayerService.UseUpItem): a stack stays in the hand.
+        /// </summary>
+        /// <param name="go">The collider's object that went into the grace period - it leaves it again, so the next
+        /// bite of a stack counts.</param>
+        /// <param name="rootGo">The item's root that is used up.</param>
+        private IEnumerator ConsumeObject(GameObject go, GameObject rootGo, [CanBeNull] AudioClip clip,
+            float destroyDelay)
         {
             if (clip != null)
             {
@@ -141,7 +164,13 @@ namespace Gothic.VR.Adapters.Vob.VobItem
             yield return new WaitForSeconds(destroyDelay);
 
             _objectsInDestroyGracePeriod.Remove(go);
-            Destroy(go);
+            if (rootGo == null)
+                yield break;
+
+            if (rootGo.GetComponent<VobLoader>() != null)
+                _vrPlayerService.UseUpItem(rootGo);
+            else
+                Destroy(rootGo);
         }
     }
 }

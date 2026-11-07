@@ -1,4 +1,5 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
 using Gothic.Core.Adapters.Properties;
 using Gothic.Core.Creator;
 using Gothic.Core.Domain.Npc.Actions;
@@ -18,6 +19,7 @@ using Reflex.Attributes;
 using UnityEngine;
 using ZenKit;
 using ZenKit.Daedalus;
+using ZenKit.Vobs;
 using Logger = Gothic.Core.Logging.Logger;
 
 namespace Gothic.Core.Adapters.Npc
@@ -33,13 +35,19 @@ namespace Gothic.Core.Adapters.Npc
         [Inject] private readonly NpcHelperService _npcHelperService;
         [Inject] private readonly NpcAiService _npcAiService;
         [Inject] private readonly NpcService _npcService;
+        [Inject] private readonly NpcFallService _npcFallService;
         [Inject] private readonly WayNetService _wayNetService;
         [Inject] private readonly VmService _vmService;
         [Inject] private readonly AnimationService _animationService;
         [Inject] private readonly PhysicsService _physicsService;
+        [Inject] private readonly PauseService _pauseService;
 
 
         private DaedalusVm Vm => _gameStateService.GothicVm;
+        private readonly HashSet<Type> _failedActionTypes = new();
+
+        // When the state's _Loop may run again (Time.time). See the Loop case in Update.
+        private float _nextLoopTime;
         private const int _daedalusLoopContinue = 0; // Id taken from a Daedalus constant.
         private const int _daedalusLoopEnd = 1;
         private const string _deadStateAnimation = "S_DeadB";
@@ -76,13 +84,17 @@ namespace Gothic.Core.Adapters.Npc
         /// </summary>
         private void Update()
         {
+            // Menu or video: no states, perceptions or scripts run while the world waits.
+            if (_pauseService.IsPaused)
+                return;
+
             // If NPC/Monster is dead, only play out the already queued animations (e.g. the dying animation
             // enqueued by FightService), then stop any further process logic.
             if (Properties.IsDead)
             {
-                Properties.CurrentAction.Tick();
+                TickCurrentAction();
 
-                if (Properties.CurrentAction.IsFinished())
+                if (IsCurrentActionFinished())
                 {
                     if (Properties.AnimationQueue.Count > 0)
                         PlayNextAnimation(Properties.AnimationQueue.Dequeue());
@@ -93,10 +105,12 @@ namespace Gothic.Core.Adapters.Npc
                 return;
             }
 
+            _npcAiService.DeliverPassivePerceptions(NpcInstance, Properties);
+            _npcFallService.Tick(NpcData);
             ExecuteActivePerceptions();
             ExecuteStates();
 
-            Properties.CurrentAction.Tick();
+            TickCurrentAction();
 
             // Add new milliseconds when stateTime shall be measured.
             if (Properties.IsStateTimeActive && Properties.CurrentLoopState == NpcProperties.LoopState.Loop)
@@ -104,23 +118,21 @@ namespace Gothic.Core.Adapters.Npc
                 Properties.StateTime += Time.deltaTime;
             }
 
+            PreloadNextAttack();
+
             // If we're not yet done, we won't handle further tasks (like dequeuing another Action)
-            if (!Properties.CurrentAction.IsFinished())
+            if (!IsCurrentActionFinished())
             {
+                // The NPC really does something - when it's done, the state's loop may react at once.
+                _nextLoopTime = 0f;
                 return;
             }
 
             // Queue is empty. Check if we want to start Looping
             if (Properties.AnimationQueue.Count == 0)
             {
-                // We always need to set "self" before executing any Daedalus function.
-                // "other" defaults to hero here so routine states (ZS_*_Loop) have a sensible fallback.
-                // Perception calls (ExecutePerception) override GlobalOther themselves with their own save/restore.
                 if (NpcInstance != null)
-                {
-                    Vm.GlobalSelf = NpcInstance;
-                    Vm.GlobalOther = Vm.GlobalHero;
-                }
+                    SetStateGlobals();
 
                 switch (Properties.CurrentLoopState)
                 {
@@ -134,20 +146,35 @@ namespace Gothic.Core.Adapters.Npc
 
                         CallAiFunction(Vob.CurrentStateIndex);
                         Properties.CurrentLoopState = NpcProperties.LoopState.Loop;
+                        // A state's start can give the hero experience on his instance (ZS_Unconscious after a won
+                        // fight) - the HUD and status menu read the vob.
+                        _npcService.SyncHeroInstanceToVob();
+                        _nextLoopTime = 0f;
                         break;
                     case NpcProperties.LoopState.Loop:
+                        // A state without _Loop, like the engine (OpenGothic tickRoutine): Gothic 2 ends it at once,
+                        // Gothic 1 keeps it until its routine time is over. Its init doesn't run again meanwhile.
                         if (Properties.StateLoop == 0 && Vob.CurrentStateIndex != 0)
                         {
-                            Properties.CurrentLoopState = NpcProperties.LoopState.Start;
+                            if (!_contextGameVersionService.IsGothic1() || IsRoutineStateOver())
+                                Properties.CurrentLoopState = NpcProperties.LoopState.End;
                             return;
                         }
 
+                        // A pass that only did instant things (AI_AlignToFP while aligned, pure checks) doesn't run
+                        // again every frame: like the engine (OpenGothic Npc::tickRoutine) it waits for the NPC's
+                        // perception time. After a real action it runs at once (fights, walking routines).
+                        if (Time.time < _nextLoopTime)
+                            break;
+                        _nextLoopTime = Time.time + Properties.PerceptionTime;
+
                         var loopResponse = CallAiFunction(Properties.StateLoop);
-                        
-                        // Some ZS_*_Loop return !=0 when they want to quit.
-                        if (loopResponse != _daedalusLoopContinue)
+
+                        // Some ZS_*_Loop return !=0 when they want to quit. Like the engine, the state also ends when
+                        // the time of its routine entry is over.
+                        if (loopResponse != _daedalusLoopContinue || IsRoutineStateOver())
                             Properties.CurrentLoopState = NpcProperties.LoopState.End;
-                        
+
                         break;
                     case NpcProperties.LoopState.End:
                         if (Properties.StateEnd != 0)
@@ -174,6 +201,85 @@ namespace Gothic.Core.Adapters.Npc
                 Logger.LogEditor($"Start playing >{Properties.AnimationQueue.Peek().GetType()}< on >{Go.transform.parent.name}<", LogCat.Ai);
                 PlayNextAnimation(Properties.AnimationQueue.Dequeue());
             }
+        }
+
+        /// <summary>
+        /// AI_ContinueRoutine, like the engine (OpenGothic Npc::resumeAiRoutine): the current state ends with its _End,
+        /// then the daily routine starts again - through the state machine like StartState (StartNextRoutine). Starting
+        /// the routine directly kept a prepared next state and the old state's other/victim.
+        /// </summary>
+        public void ResumeRoutine()
+        {
+            var hasStateEnded = Properties.CurrentLoopState is NpcProperties.LoopState.End or
+                NpcProperties.LoopState.AfterEnd;
+            if (Properties.StateEnd != 0 && !hasStateEnded)
+            {
+                var other = Properties.StateOther ?? (NpcInstance)Vm.GlobalHero;
+                _vmService.CallAsNpc(Properties.StateEnd, NpcInstance, other, Properties.StateVictim, LogCat.Ai);
+            }
+
+            Properties.StateEnd = 0;
+            Vob.NextStateValid = false;
+            ClearState(false);
+        }
+
+        /// <summary>
+        /// The time of the routine entry is over and the NPC is free for the next one. Like the engine (OpenGothic
+        /// Npc::tickRoutine), a fight or a talk isn't interrupted - here: a drawn weapon against a living target, a
+        /// dialog - and neither is lying knocked out.
+        /// </summary>
+        private bool IsRoutineStateOver()
+        {
+            if (!Properties.IsRoutineTimeOver)
+                return false;
+
+            var dialogs = _gameStateService.Dialogs;
+            if (dialogs.IsInDialog && dialogs.CurrentDialogNpc == NpcData)
+                return false;
+
+            if (Properties.BodyState == VmGothicEnums.BodyState.BsUnconscious)
+                return false;
+
+            var target = Properties.TargetNpc?.GetUserData();
+            if (target != null && !target.IsDown() &&
+                (VmGothicEnums.WeaponState)Vob.FightMode != VmGothicEnums.WeaponState.NoWeapon)
+                return false;
+
+            Logger.LogEditor($"[Routine] {NpcInstance.GetName(NpcNameSlot.Slot0)}: the time of {Vob.CurrentStateName} " +
+                             "is over - next routine entry", LogCat.Ai);
+            return true;
+        }
+
+        /// <summary>
+        /// The engine's fight AI runs all the time, so the next attack is asked for before the swing's combo window
+        /// closes. Our state loop only runs once the queue is empty - the swing would play to its end and a combo
+        /// never happen. Once the window opens with nothing queued, the state's loop runs once now.
+        /// </summary>
+        private void PreloadNextAttack()
+        {
+            if (Properties.CurrentAction is not AttackPlayAni { IsWaitingForNextAttack: true } attack ||
+                Properties.AnimationQueue.Count > 0 || Properties.CurrentLoopState != NpcProperties.LoopState.Loop ||
+                Properties.StateLoop == 0)
+                return;
+
+            attack.MarkNextAttackRequested();
+            SetStateGlobals();
+
+            if (CallAiFunction(Properties.StateLoop) != _daedalusLoopContinue)
+                Properties.CurrentLoopState = NpcProperties.LoopState.End;
+        }
+
+        /// <summary>
+        /// The globals of the NPC's state, set before its functions run. "self" always; "other" is the one the state
+        /// was started with (ZS_Attack against a wolf), else the hero so routine states (ZS_*_Loop) have a sensible
+        /// fallback. Perception calls (ExecutePerception) set their own with their own save/restore.
+        /// </summary>
+        private void SetStateGlobals()
+        {
+            Vm.GlobalSelf = NpcInstance;
+            Vm.GlobalOther = Properties.StateOther ?? Vm.GlobalHero;
+            if (Properties.StateVictim != null)
+                Vm.GlobalVictim = Properties.StateVictim;
         }
 
         private int CallAiFunction(int symbolIndex)
@@ -238,9 +344,35 @@ namespace Gothic.Core.Adapters.Npc
             }
 
 
+            // Like the engine (OpenGothic Npc::perceptionProcess): the nearest body the NPC senses - monsters eat it,
+            // humans look at the dead (found on BoroBongo's branch).
+            if (Properties.Perceptions.TryGetValue(VmGothicEnums.PerceptionType.AssessBody, out var bodyPerception) &&
+                bodyPerception >= 0)
+            {
+                var body = _npcAiService.FindNearestBody(NpcInstance);
+                if (body != null)
+                    _npcAiService.ExecutePerception(VmGothicEnums.PerceptionType.AssessBody, Properties, NpcInstance,
+                        null, body);
+            }
+
             // FIXME - We need to add other active perceptions here:
-            //         PERC_ASSESSBODY, PERC_ASSESSITEM, PERC_ASSESSFIGHTER
+            //         PERC_ASSESSITEM
             //         But at best when we test it immediately
+
+            // The hero with a drawn weapon in sight, like the original engine's PERC_ASSESSFIGHTER - B_AssessFighter
+            // checks distance and attitude itself (found on BoroBongo's branch).
+            if (Properties.Perceptions.TryGetValue(VmGothicEnums.PerceptionType.AssessFighter,
+                    out var fighterPerception) && fighterPerception >= 0)
+            {
+                var heroVob = hero?.GetUserData()?.Vob;
+                if (heroVob != null && HeroPerceptionService.IsArmed((VmGothicEnums.WeaponState)heroVob.FightMode) &&
+                    _npcHelperService.CanSenseNpc(NpcInstance, hero, false,
+                        _npcHelperService.GetPerceptionRange(VmGothicEnums.PerceptionType.AssessFighter)))
+                {
+                    _npcAiService.ExecutePerception(VmGothicEnums.PerceptionType.AssessFighter, Properties,
+                        NpcInstance, null, hero);
+                }
+            }
 
             // Reset timer if we executed Perceptions.
             Properties.CurrentPerceptionTime = 0f;
@@ -276,6 +408,13 @@ namespace Gothic.Core.Adapters.Npc
             // If we have nothing prepared, start daily Routine.
             else
             {
+                // Back to the routine: its states get the hero as "other" again, the new entry's time runs, a fight's
+                // chase route is over.
+                Properties.StateOther = null;
+                Properties.StateVictim = null;
+                Properties.IsRoutineTimeOver = false;
+                Properties.ChaseRoute = null;
+
                 var currentRoutine = Properties.RoutineCurrent;
                 if (currentRoutine != null)
                     StartRoutine(currentRoutine.Action, currentRoutine.Waypoint);
@@ -343,11 +482,27 @@ namespace Gothic.Core.Adapters.Npc
                 }
                 Logger.Log($"Start new routine >{routineSymbol.Name}< on >{Go.transform.parent.name}<", LogCat.Ai);
                 Properties.StateTime = 0;
+
+                // Like the engine (OpenGothic Npc::startState), every new state starts without perceptions and its init
+                // enables its own. Back on its routine an NPC kept e.g. ZS_AssessFighter's and answered every later
+                // weapon removal with "$WISEMOVE" (found on BoroBongo's branch). StartState already clears them.
+                Properties.Perceptions.Clear();
             }
         }
 
         /// <summary>
-        /// Clear ZS functions. If callEndFunction=true, then ZS_*_End() animations will play before moving to new animation.
+        /// The running action is dropped for a new state: it's stopped first, so it doesn't leave its job half done (a
+        /// sheath cut short kept the NPC armed in fight stance).
+        /// </summary>
+        private void ReplaceCurrentAction()
+        {
+            Properties.CurrentAction?.StopImmediately();
+            Properties.CurrentAction = new None(new AnimationAction(), NpcData);
+        }
+
+        /// <summary>
+        /// Clear ZS functions. If callEndFunction=true, then ZS_*_End() animations will play before moving to new
+        /// animation.
         /// </summary>
         public void ClearState(bool callEndFunction)
         {
@@ -367,11 +522,15 @@ namespace Gothic.Core.Adapters.Npc
                 if (NpcData.IsUsingMob() || Properties.CurrentAction is UseMob)
                 {
                     if (Properties.CurrentAction is not UseMob)
-                        Properties.CurrentAction = new None(new AnimationAction(), NpcData);
+                        ReplaceCurrentAction();
                     return;
                 }
 
-                Properties.CurrentAction = new None(new AnimationAction(), NpcData);
+                ReplaceCurrentAction();
+                // A state change doesn't stand the dead up (found on BoroBongo's branch).
+                if (Properties.IsDead)
+                    return;
+
                 Properties.BodyState = VmGothicEnums.BodyState.BsStand;
 
                 PrefabProps.AnimationSystem.StopAllAnimations();
@@ -381,7 +540,54 @@ namespace Gothic.Core.Adapters.Npc
         private void PlayNextAnimation(AbstractAnimationAction action)
         {
             Properties.CurrentAction = action;
-            action.Start();
+            try
+            {
+                action.Start();
+            }
+            catch (Exception e)
+            {
+                SkipFailedAction(e);
+            }
+        }
+
+        private void TickCurrentAction()
+        {
+            try
+            {
+                Properties.CurrentAction.Tick();
+            }
+            catch (Exception e)
+            {
+                SkipFailedAction(e);
+            }
+        }
+
+        private bool IsCurrentActionFinished()
+        {
+            try
+            {
+                return Properties.CurrentAction.IsFinished();
+            }
+            catch (Exception e)
+            {
+                SkipFailedAction(e);
+                return true;
+            }
+        }
+
+        /// <summary>
+        /// An action that threw can't finish on its own - it threw again every frame and the NPC hung in it (an orc
+        /// frozen in his dialog line). It counts as done, the NPC goes on with the next one. Logged once per action
+        /// type and NPC.
+        /// </summary>
+        private void SkipFailedAction(Exception e)
+        {
+            var actionType = Properties.CurrentAction.GetType();
+            if (_failedActionTypes.Add(actionType))
+                Logger.LogError($"{actionType.Name} of {Go.transform.parent?.name} threw - skipped. Later " +
+                                $"failures of this action on this NPC are not logged. {e}", LogCat.Ai);
+
+            Properties.CurrentAction = new None(new AnimationAction(), NpcData);
         }
 
         /// <summary>
@@ -390,6 +596,17 @@ namespace Gothic.Core.Adapters.Npc
         /// </summary>
         public void ReEnableNpc()
         {
+            // The dead stay where they died and lie: a corpse culled in again went to its routine waypoint and stood in
+            // the bind pose (found on BoroBongo's branch).
+            if (Properties.IsDead)
+            {
+                Properties.AnimationQueue.Clear();
+                Properties.CurrentAction = new None(new AnimationAction(), NpcData);
+                if (!PrefabProps.AnimationSystem.PlayAnimation("S_DEADB"))
+                    PrefabProps.AnimationSystem.PlayAnimation("S_DEAD");
+                return;
+            }
+
             // Spawn to initial spawn location
             var currentRoutine = Properties.RoutineCurrent;
             if (currentRoutine != null)
@@ -397,7 +614,7 @@ namespace Gothic.Core.Adapters.Npc
                 var wp = _wayNetService.GetWayNetPoint(currentRoutine.Waypoint);
                 if (wp != null)
                 {
-                    gameObject.transform.position = _npcService.GetFreeAreaAtSpawnPoint(wp.Position);
+                    gameObject.transform.position = _npcService.GetFreeAreaAtSpawnPoint(wp.Position, gameObject);
                     Properties.CurrentFreePoint = wp as FreePoint;
                     Properties.CurrentWayPoint = wp as WayPoint;
                 }
@@ -429,6 +646,17 @@ namespace Gothic.Core.Adapters.Npc
             // Whenever re-enabled they are still attached / sit / stand at their points. Otherwise, another NPC
             // Will steal it if un-culled earlier.
 
+
+            // A fight is over after culling: the weapon goes back (it would be destroyed with the hand items below),
+            // a knocked out NPC stands, the state's other, the combo and the chase route are forgotten.
+            UndrawWeapon.SheathAtOnce(NpcData);
+            if (Properties.BodyState == VmGothicEnums.BodyState.BsUnconscious)
+                Properties.BodyState = VmGothicEnums.BodyState.BsStand;
+            Properties.StateOther = null;
+            Properties.StateVictim = null;
+            Properties.AttackCombo.Length = 0;
+            Properties.AttackCombo.ContinueAnimation = null;
+            Properties.ChaseRoute = null;
 
             // CurrentItem handling
             Properties.ItemAnimationState = -1;
@@ -474,6 +702,25 @@ namespace Gothic.Core.Adapters.Npc
                 //if we don't have a routine means it's about a monster
                 StartRoutine(Vob.CurrentStateIndex, Vob.CurrentStateIsRoutine);
             }
+        }
+
+        /// <summary>
+        /// The time jumped (NpcService.ResetNpcsToRoutines): like the engine (OpenGothic Npc::resetPositionToTA) the NPC
+        /// is put on its routine point, its state ends without _End, its fight is forgotten and the weapon put away.
+        /// Monsters go back to their start state, not the one they were in (an attack).
+        /// </summary>
+        public void ResetToRoutine()
+        {
+            Properties.EnemyNpc = null;
+            Properties.TargetNpc = null;
+
+            var isWeaponDrawn = (VmGothicEnums.WeaponState)Vob.FightMode != VmGothicEnums.WeaponState.NoWeapon;
+            ReEnableNpc();
+
+            if (Properties.RoutineCurrent == null && NpcInstance.StartAiState != 0)
+                StartRoutine(NpcInstance.StartAiState);
+            if (isWeaponDrawn)
+                _npcAiService.ExtAiUndrawWeapon(NpcInstance);
         }
 
         public void DisableNpc()

@@ -1,0 +1,31 @@
+{
+    "name": "Gothic.Tests.Behaviour",
+    "rootNamespace": "Gothic.Tests.Behaviour",
+    "references": [
+        "UnityEngine.TestRunner",
+        "UnityEditor.TestRunner",
+        "Gothic.Core",
+        "Gothic.VR",
+        "Reflex",
+        "MyBox",
+        "Unity.InputSystem",
+        "Unity.InputSystem.TestFramework",
+        "Unity.XR.Interaction.Toolkit"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "nunit.framework.dll",
+        "ZenKit.dll",
+        "Gherkin.dll",
+        "Cucumber.Messages.dll"
+    ],
+    "autoReferenced": false,
+    "defineConstraints": [
+        "UNITY_INCLUDE_TESTS"
+    ],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

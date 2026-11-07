@@ -4,6 +4,7 @@ using System.Diagnostics.CodeAnalysis;
 using Gothic.Core.Logging;
 using Gothic.Core.Models.Container;
 using Gothic.Core.Models.Vm;
+using Gothic.Core.Models.Vob;
 using JetBrains.Annotations;
 using MyBox;
 using UnityEngine;
@@ -58,6 +59,20 @@ namespace Gothic.Core.Extensions
 
             trigger.CountCanBeActivated--;
             return true;
+        }
+
+        /// <summary>
+        /// The mob scheme scripts name mobs by (Wld_IsMobAvailable, Npc_GetDetectedMob, Wld_SetMobRoutine): the visual's
+        /// name up to the first '_', or up to its extension if it has none, in capitals (BED_1_OC.ASC: BED,
+        /// FIREPLACE_HIGH2.ASC: FIREPLACE).
+        /// </summary>
+        public static string GetMobScheme([CanBeNull] this IVirtualObject vob)
+        {
+            var visual = vob?.Visual?.Name ?? string.Empty;
+            var end = visual.IndexOf('_');
+            if (end < 0)
+                end = visual.IndexOf('.');
+            return (end > 0 ? visual.Substring(0, end) : visual).ToUpperInvariant();
         }
 
         /// <summary>
@@ -164,6 +179,31 @@ namespace Gothic.Core.Extensions
                 m32 = matrix.M43,
                 m33 = matrix.M44
             };
+        }
+
+        /// <summary>
+        /// A Gothic light in Unity units: range cm to m, byte colors to colors, its range and color animation and its
+        /// lens flare effect.
+        /// </summary>
+        public static LightProfile ToLightProfile(this ZenKit.Vobs.Light light)
+        {
+            var rangeKeys = light.RangeAnimationScale;
+            var rangeScales = new float[rangeKeys?.Count ?? 0];
+            for (var i = 0; i < rangeScales.Length; i++)
+                rangeScales[i] = rangeKeys[i];
+
+            var colorKeys = light.ColorAnimationList;
+            var colors = new UnityEngine.Color[colorKeys?.Count ?? 0];
+            for (var i = 0; i < colors.Length; i++)
+            {
+                var key = colorKeys[i];
+                colors[i] = new UnityEngine.Color(key.R / 255f, key.G / 255f, key.B / 255f);
+            }
+
+            var color = light.Color;
+            return new LightProfile(light.Range * .01f, new UnityEngine.Color(color.R / 255f, color.G / 255f,
+                    color.B / 255f), rangeScales, light.RangeAnimationFps, light.RangeAnimationSmooth, colors,
+                light.ColorAnimationFps, light.ColorAnimationSmooth, light.LensflareFx);
         }
 
         public static BoneWeight ToBoneWeight(this List<SoftSkinWeightEntry> weights, List<int> nodeMapping)
@@ -390,15 +430,33 @@ namespace Gothic.Core.Extensions
         }
 
         /// <summary>
-        /// Movers, triggers and chests are looked up by name (Wld_SendTrigger, chained targets, Mob_HasItems) - root
-        /// and child VOBs alike. The one rule for GameStateService.RegisterNamedVob and the child VOB loader.
+        /// The symbol is an instance whose class (directly or through its prototype) is this one. ZenKit aborts the
+        /// process when asked to initialize anything else as that class, so check before InitInstance.
+        /// </summary>
+        public static bool IsInstanceOf(this DaedalusVm vm, [CanBeNull] DaedalusSymbol symbol, string className)
+        {
+            if (vm == null || symbol == null || symbol.Type != DaedalusDataType.Instance)
+                return false;
+
+            var parent = symbol.Parent >= 0 ? vm.GetSymbolByIndex(symbol.Parent) : null;
+            if (parent is { Type: DaedalusDataType.Prototype })
+                parent = parent.Parent >= 0 ? vm.GetSymbolByIndex(parent.Parent) : null;
+
+            return parent != null && parent.Name.Equals(className, StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>
+        /// Movers, triggers, earthquakes and chests are looked up by name (Wld_SendTrigger, chained targets,
+        /// Mob_HasItems) - root and child VOBs alike. The one rule for GameStateService.RegisterNamedVob and the child
+        /// VOB loader.
         /// </summary>
         public static bool IsLookedUpByName(this VirtualObjectType type)
         {
             return type is VirtualObjectType.zCMover or VirtualObjectType.oCTriggerScript
                 or VirtualObjectType.zCTriggerList or VirtualObjectType.zCCodeMaster
                 or VirtualObjectType.zCTrigger or VirtualObjectType.zCMoverController
-                or VirtualObjectType.zCMessageFilter or VirtualObjectType.oCMobContainer;
+                or VirtualObjectType.zCMessageFilter or VirtualObjectType.oCMobContainer
+                or VirtualObjectType.zCEarthquake;
         }
     }
 }

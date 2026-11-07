@@ -17,6 +17,7 @@ using Gothic.Core.Models.Proxy;
 using Gothic.Core.Models.Vm;
 using Gothic.Core.Services.Caches;
 using Gothic.Core.Services.Config;
+using Gothic.Core.Services.Culling;
 using Gothic.Core.Services.Player;
 using Gothic.Core.Services.Vm;
 using Gothic.Core.Services.Vobs;
@@ -38,7 +39,7 @@ namespace Gothic.Core.Services.Npc
     /// </summary>
     public class NpcService : ILazyInitQueue
     {
-        public Dictionary<string, List<(int hour, int minute, int status)>> MobRoutines = new();
+        private static readonly int _attributeCount = Enum.GetNames(typeof(NpcAttribute)).Length;
 
         [Inject] private readonly GameStateService _gameStateService;
         [Inject] private readonly VmService _vmService;
@@ -50,17 +51,26 @@ namespace Gothic.Core.Services.Npc
         [Inject] private readonly SaveGameService _saveGameService;
         [Inject] private readonly PlayerService _playerService;
         [Inject] private readonly WayNetService _wayNetService;
+        [Inject] private readonly NpcMeshCullingService _npcMeshCullingService;
         [Inject] private readonly VobService _vobService;
         [Inject] private readonly NpcInventoryService _npcInventoryService;
+        [Inject] private readonly EquipmentService _equipmentService;
+        [Inject] private readonly NpcRoutineService _npcRoutineService;
+        [Inject] private readonly MobRoutineService _mobRoutineService;
+        [Inject] private readonly NpcLookService _npcLookService;
+        [Inject] private readonly AnimationService _animationService;
 
         
         // Supporter class where the whole Init() logic is outsourced for better readability.
         private readonly NpcInitializerDomain _initializerDomain = new NpcInitializerDomain().Inject();
-        private readonly NpcDeathDomain _deathDomain = new NpcDeathDomain().Inject();
+        private NpcDeathDomain _deathDomain;
+        private NpcDeathDomain DeathDomain => _deathDomain ??= new NpcDeathDomain(SyncHeroInstanceToVob).Inject();
 
 
         private readonly NearestFirstQueue<NpcLoader> _objectsToInitQueue = new();
         private Queue<NpcContainer> _objectToReEnableQueue = new();
+        // NPCs to put back on their routine after the time jumped - culled ones once they show up again.
+        private readonly HashSet<NpcContainer> _routineResets = new();
 
         private DaedalusVm _vm => _gameStateService.GothicVm;
 
@@ -75,6 +85,8 @@ namespace Gothic.Core.Services.Npc
             GlobalEventDispatcher.LoadGameStart.AddListener(() =>
             {
                 ClearQueues();
+                // The new game's VM has its own dialogs (BootstrapDomain).
+                _ambientInfoByPrefix = null;
             });
             
             GlobalEventDispatcher.NpcMeshCullingChanged.AddListener(EventNpcMeshCullingChanged);
@@ -85,6 +97,7 @@ namespace Gothic.Core.Services.Npc
         {
             _objectsToInitQueue.Clear();
             _objectToReEnableQueue.Clear();
+            _routineResets.Clear();
         }
 
         public int CountQueuedWithin(Vector3 center, float radius)
@@ -167,7 +180,10 @@ namespace Gothic.Core.Services.Npc
                 {
                     var npcData = _objectToReEnableQueue.Dequeue();
                     // If we walked to an NPC in our game, the NPC will be re-enabled and Routines get reset.
-                    npcData.PrefabProps?.AiHandler?.ReEnableNpc();
+                    if (_routineResets.Remove(npcData))
+                        npcData.PrefabProps?.AiHandler?.ResetToRoutine();
+                    else
+                        npcData.PrefabProps?.AiHandler?.ReEnableNpc();
                     yield return _frameSkipperService.TrySkipToNextFrameCoroutine();
                 }
             }
@@ -178,9 +194,9 @@ namespace Gothic.Core.Services.Npc
             _initializerDomain.RootGo = rootGo;
         }
 
-        public Vector3 GetFreeAreaAtSpawnPoint(Vector3 positionToScan)
+        public Vector3 GetFreeAreaAtSpawnPoint(Vector3 positionToScan, GameObject ownNpc = null)
         {
-            return _initializerDomain.GetFreeAreaAtSpawnPoint(positionToScan);
+            return _initializerDomain.GetFreeAreaAtSpawnPoint(positionToScan, ownNpc);
         }
 
         /// <summary>
@@ -199,10 +215,35 @@ namespace Gothic.Core.Services.Npc
             return true;
         }
 
+        /// <summary>
+        /// The NPC leaves the world: its culling entry, the NPC cache, its objects. For Wld_RemoveNpc and for NPCs
+        /// spawned for a while (a test, a summon that ends). Other NPCs' targets aren't cleared.
+        /// </summary>
+        public void RemoveNpc(NpcContainer npc)
+        {
+            if (npc == null || npc == GetHeroContainer())
+            {
+                Logger.LogWarning("[NpcService] RemoveNpc: no NPC or the hero - nothing removed", LogCat.Npc);
+                return;
+            }
+
+            var lazyLoadRoot = _npcMeshCullingService.RemoveCullingEntry(npc.Instance);
+            _multiTypeCacheService.NpcCache.Remove(npc);
+            if (_objectToReEnableQueue.Contains(npc))
+                _objectToReEnableQueue = new Queue<NpcContainer>(_objectToReEnableQueue.Where(queued => queued != npc));
+
+            // The NPC's GameObject normally lives under its lazy-load root - destroy it too if it doesn't.
+            if (npc.Go != null && (lazyLoadRoot == null || !npc.Go.transform.IsChildOf(lazyLoadRoot.transform)))
+                Object.Destroy(npc.Go);
+            if (lazyLoadRoot != null)
+                Object.Destroy(lazyLoadRoot);
+
+            Logger.Log($"[NpcService] {npc.Instance.GetName(NpcNameSlot.Slot0)} removed from the world", LogCat.Npc);
+        }
+
         public async Task CreateWorldNpcs(LoadingService loading)
         {
-            MobRoutines.ClearAndReleaseMemory();
-            MobRoutines = new();
+            _mobRoutineService.ClearRoutines();
             
             // STARTUP_* runs only the first time a world is entered (new game or a world not inside the save yet).
             // Otherwise, the NPCs are restored from the save game / the state stored when we left the world.
@@ -273,11 +314,27 @@ namespace Gothic.Core.Services.Npc
 
             props.BodyData = data;
 
-            if (data.Armor >= 0)
+            // An armor that isn't an item (a mod's broken instance) is worn as no armor - it threw and stopped the
+            // creation of every NPC after this one (found on BoroBongo's branch).
+            var armorData = data.Armor >= 0 ? _vmCacheService.TryGetItemData(data.Armor) : null;
+            if (data.Armor >= 0 && armorData == null)
+                Logger.LogWarning($"[NpcService] Mdl_SetVisualBody: armor {data.Armor} of " +
+                                  $"{data.Npc.GetName(NpcNameSlot.Slot0)} is no item - no armor", LogCat.Npc);
+
+            if (armorData != null)
             {
-                var armorData = _vmCacheService.TryGetItemData(data.Armor);
-                props.EquippedItems.Add(_vmCacheService.TryGetItemData(data.Armor));
-                props.MdmName = armorData.VisualChange;
+                // Like the engine (OpenGothic mdl_setvisualbody): the armor is worn like with EquipItem - it protects.
+                _equipmentService.EquipByScript(data.Npc.GetUserData(), armorData);
+
+                // A helmet or an armor without visual_change keeps the body - an empty mesh name leaves the NPC
+                // without any mesh.
+                var isHelmet = EquipmentService.IsHelmet(armorData);
+                var hasNoLook = string.IsNullOrEmpty(armorData.VisualChange);
+                if (hasNoLook && !isHelmet)
+                    Logger.LogWarning($"[NpcService] Mdl_SetVisualBody: armor {armorData.Name} of " +
+                                      $"{data.Npc.GetName(NpcNameSlot.Slot0)} has no visual_change - plain body",
+                        LogCat.Npc);
+                props.MdmName = isHelmet || hasNoLook ? data.Body : armorData.VisualChange;
             }
             else
             {
@@ -287,13 +344,29 @@ namespace Gothic.Core.Services.Npc
 
         public NpcInstance ExtHlpGetNpc(int instanceId)
         {
-            return _multiTypeCacheService.NpcCache
+            var npc = _multiTypeCacheService.NpcCache
                 .FirstOrDefault(i => i.Instance.Index == instanceId)?
                 .Instance;
+            if (npc != null)
+                return npc;
+
+            // Like the engine, a variable (SELF, OTHER, ...) gives the NPC it points to: Hlp_GetNpc(self) in
+            // B_KillNpc(self) was null (found on BoroBongo's branch).
+            var symbol = _gameStateService.GothicVm.GetSymbolByIndex(instanceId);
+            var variableNpc = symbol is { Type: DaedalusDataType.Instance } ? symbol.GetInstance() as NpcInstance : null;
+            return variableNpc?.GetUserData()?.Vob != null ? variableNpc : null;
         }
 
         public void ExtNpcChangeAttribute(NpcInstance npc, int attributeId, int value)
         {
+            // A script passing no NPC (Hlp_GetNpc found none) mustn't break the calling function.
+            if (npc?.GetUserData()?.Vob == null)
+            {
+                Logger.LogWarning($"[NpcService] Npc_ChangeAttribute({attributeId}, {value}) without an NPC - skipped",
+                    LogCat.Npc);
+                return;
+            }
+
             var container = npc.GetUserData();
             var vob = container.Vob;
             var newValue = vob.GetAttribute(attributeId) + value;
@@ -322,9 +395,17 @@ namespace Gothic.Core.Services.Npc
             npc.Instance.SetAttribute(attribute, value);
             GlobalEventDispatcher.NpcAttributeChanged.Invoke(npc, attribute);
 
-            if (attribute == NpcAttribute.HitPoints && value <= 0 &&
-                npc.Props.BodyState != VmGothicEnums.BodyState.BsDead)
-                _deathDomain.Die(npc);
+            if (attribute == NpcAttribute.HitPoints && value <= 0 && !npc.Props.IsDead)
+                DeathDomain.Die(npc);
+        }
+
+        /// <summary>
+        /// The NPC dies now, killed by the killer (a fight). The scripts' part follows (ZS_Dead, NpcDeathDomain).
+        /// </summary>
+        public void Kill(NpcContainer npc, NpcContainer killer)
+        {
+            if (!npc.Props.IsDead)
+                DeathDomain.Die(npc, killer);
         }
 
         public void SetLevel(NpcContainer npc, int level)
@@ -352,10 +433,24 @@ namespace Gothic.Core.Services.Npc
         public void SyncHeroInstanceToVob()
         {
             var hero = GetHeroContainer();
+            // Wonderbranch merge: #447 copies more than #465's early-out compares (guild, protections, missions) -
+            // without the early-out until both are in main.
             if (hero == null)
                 return;
 
-            hero.Vob.CopyStatsFromInstance(hero.Instance);
+            // It runs after every NPC's state start (a state may pay the hero): mostly nothing changed, and then
+            // nothing is announced. The announced values are compared before the copy, which takes all stats.
+            var vob = hero.Vob;
+            var instance = hero.Instance;
+            var isChanged = vob.Level != instance.Level || vob.Xp != instance.Exp ||
+                            vob.XpNextLevel != instance.ExpNext || vob.Lp != instance.Lp;
+            for (var i = 0; i < _attributeCount && !isChanged; i++)
+                isChanged = vob.GetAttribute(i) != instance.GetAttribute((NpcAttribute)i);
+
+            vob.CopyStatsFromInstance(instance);
+
+            if (!isChanged)
+                return;
 
             GlobalEventDispatcher.NpcAttributeChanged.Invoke(hero, NpcAttribute.HitPoints);
             GlobalEventDispatcher.NpcAttributeChanged.Invoke(hero, NpcAttribute.HitPointsMax);
@@ -443,19 +538,102 @@ namespace Gothic.Core.Services.Npc
 
         public void ExtMdlSetModelScale(NpcInstance npc, System.Numerics.Vector3 scale)
         {
-            // FIXME - Set this value on actual GameObject later.
-            npc.GetUserData().Vob.ModelScale = scale;
+            var container = npc.GetUserData();
+            container.Vob.ModelScale = scale;
+            _initializerDomain.ApplyModelScale(container);
         }
 
         public void ExtSetModelFatness(NpcInstance npc, float fatness)
         {
-            // FIXME - Set this value on actual GameObject later.
-            npc.GetUserData().Vob.ModelFatness = fatness;
+            var container = npc.GetUserData();
+            if (container == null)
+            {
+                Logger.LogWarning($"[NpcService] Mdl_SetModelFatness: NPC {npc.Index} has no container - " +
+                    $"fatness {fatness} ignored.", LogCat.Npc);
+                return;
+            }
+
+            _npcLookService.SetFatness(container, fatness);
         }
 
+        /// <summary>
+        /// Like the engine, the NPC keeps the scripts' overlays in a list (saved with it), the newest one plays. A
+        /// drawn weapon keeps its fight stance until it's put away (UndrawWeapon).
+        /// </summary>
         public void ExtApplyOverlayMds(NpcInstance npc, string overlayName)
         {
-            npc.GetUserData().Props.MdsNameOverlay = overlayName;
+            var container = npc.GetUserData();
+            if (container.Vob.Overlays.FindIndex(i => i.EqualsIgnoreCase(overlayName)) < 0)
+                container.Vob.AddOverlay(overlayName);
+
+            if ((VmGothicEnums.WeaponState)container.Vob.FightMode == VmGothicEnums.WeaponState.NoWeapon)
+                container.Props.MdsNameOverlay = overlayName;
+        }
+
+        public void ExtRemoveOverlayMds(NpcInstance npc, string overlayName)
+        {
+            var container = npc.GetUserData();
+            var index = container.Vob.Overlays.FindIndex(i => i.EqualsIgnoreCase(overlayName));
+            if (index < 0)
+                return;
+
+            container.Vob.RemoveOverlay(index);
+            if ((VmGothicEnums.WeaponState)container.Vob.FightMode == VmGothicEnums.WeaponState.NoWeapon)
+                container.Props.MdsNameOverlay = container.GetScriptOverlay();
+        }
+
+        /// <summary>
+        /// Mdl_ApplyOverlayMDSTimed, like the engine (OpenGothic Npc::addOverlay with a time): the overlay for that long,
+        /// then the one before is back. Used by G1's haste potions and G2's speed potion (HUMANS_SPRINT.MDS). The VR hero
+        /// has no animations: he walks and runs as much faster as the overlay's walk and run (HeroSpeedChanged).
+        /// </summary>
+        public void ExtApplyOverlayMdsTimed(NpcInstance npc, string overlayName, int milliseconds)
+        {
+            var container = npc?.GetUserData();
+            var seconds = milliseconds / 1000f;
+            if (container?.Props == null || string.IsNullOrEmpty(overlayName) || seconds <= 0f)
+                return;
+
+            if (container.PrefabProps?.IsHero() == true)
+            {
+                var walkFactor = GetOverlaySpeedFactor(container, overlayName, "S_WALKL");
+                var runFactor = GetOverlaySpeedFactor(container, overlayName, "S_RUNL");
+                Logger.Log($"[NpcService] Hero: {overlayName} for {seconds:F0} s - walk x{walkFactor:F2}, " +
+                           $"run x{runFactor:F2}", LogCat.Npc);
+                GlobalEventDispatcher.HeroSpeedChanged.Invoke(walkFactor, runFactor, seconds);
+                return;
+            }
+
+            var previous = container.Props.MdsNameOverlay;
+            container.Props.MdsNameOverlay = overlayName;
+            _unityMonoService.StartCoroutine(RemoveOverlayLater(container, overlayName, previous, seconds));
+        }
+
+        private static IEnumerator RemoveOverlayLater(NpcContainer npc, string overlayName, string previous,
+            float seconds)
+        {
+            yield return new WaitForSeconds(seconds);
+            // Another overlay came meanwhile (drawn weapon, routine): it stays.
+            if (npc.Props != null && npc.Props.MdsNameOverlay == overlayName)
+                npc.Props.MdsNameOverlay = previous;
+        }
+
+        /// <summary>
+        /// How much faster the animation's root motion is with the overlay than without. 1 if it can't be told.
+        /// </summary>
+        private float GetOverlaySpeedFactor(NpcContainer npc, string overlayName, string animationName)
+        {
+            var normal = _animationService.GetTrack(animationName, npc.Props.MdsNameBase, null);
+            var overlay = _animationService.GetTrack(animationName, npc.Props.MdsNameBase, overlayName);
+            if (normal == null || overlay == null || normal.MovementSpeed.z <= 0f || overlay.MovementSpeed.z <= 0f)
+            {
+                Logger.LogWarning($"[NpcService] No forward root motion of {animationName} in " +
+                                  $"{npc.Props.MdsNameBase} with and without {overlayName} - speed unchanged.",
+                    LogCat.Npc);
+                return 1f;
+            }
+
+            return overlay.MovementSpeed.z / normal.MovementSpeed.z;
         }
 
         public void ExtNpcSetToFistMode(NpcInstance npc)
@@ -536,6 +714,33 @@ namespace Gothic.Core.Services.Npc
         public void ReEnableNpc(NpcContainer npcData)
         {
             _objectToReEnableQueue.Enqueue(npcData);
+        }
+
+        /// <summary>
+        /// The time jumped (the hero slept, Wld_SetTime): like the engine (OpenGothic WorldObjects::resetPositionToTA)
+        /// every living NPC is put on the routine point of the new time and starts it over (found on BoroBongo's
+        /// branch). Before, NPCs stood where they were and kept chasing the hero. One per frame, so they don't spawn
+        /// into each other; culled ones when they show up again. The dead and the unconscious stay.
+        /// </summary>
+        public void ResetNpcsToRoutines()
+        {
+            _npcRoutineService.RecalculateAllRoutines();
+
+            var heroIndex = (_gameStateService.GothicVm.GlobalHero as NpcInstance)?.Index;
+            foreach (var npc in _multiTypeCacheService.NpcCache)
+            {
+                if (npc?.Props == null || npc.Instance == null || npc.Instance.Index == heroIndex)
+                    continue;
+                if (npc.Props.IsDead || npc.Props.BodyState == VmGothicEnums.BodyState.BsUnconscious)
+                    continue;
+                if (!_routineResets.Add(npc))
+                    continue;
+
+                if (npc.Go != null && npc.Go.activeInHierarchy)
+                    _objectToReEnableQueue.Enqueue(npc);
+            }
+
+            Logger.Log($"[NpcService] Time jumped - {_routineResets.Count} NPCs go back to their routine", LogCat.Ai);
         }
 
         public string ExtNpcGetNextWp(NpcInstance npc)
@@ -699,6 +904,10 @@ namespace Gothic.Core.Services.Npc
             {
                 var initializedNow = InitNpc(npcLoader.gameObject);
 
+                // Its first initialization starts the routine anyway: a reset after a time jump is done with it.
+                if (initializedNow)
+                    _routineResets.Remove(npcContainer);
+
                 // If the NPC !wasOutOfDistance (==wasInDistanceAlready), then we spawned our VRPlayer next to the NPC
                 // (e.g. from a save game) and we need to go on with the current routine instead of "resetting" the routine.
                 // (Which would respawn NPC at a waypoint, which is wrong.)
@@ -706,6 +915,10 @@ namespace Gothic.Core.Services.Npc
                 {
                     ReEnableNpc(npcContainer);
                 }
+
+                // An NPC built before keeps its body while culled, but loses a ghost's see-through look.
+                if (!initializedNow)
+                    _npcLookService.Apply(npcContainer);
             }
         }
         

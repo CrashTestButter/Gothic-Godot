@@ -28,13 +28,13 @@ MonoBehaviour:
   IgnoreSpammyZSpyLogs: 1
   ZenKitLogLevel: 1
   DirectMusicLogLevel: 30
-  EnableMainMenu: 1
+  EnableMainMenu: 0
   LoadFromSaveSlot: 0
   SaveSlotToLoad: 0
   PreselectWorldToSpawn: 0
   SpawnAtWaypoint: 
   SpeedUpLoading: 0
-  SkipVideos: 0
+  SkipVideos: 1
   EnableVOBs: 1
   SpawnVOBTypes:
     Value: 
@@ -63,7 +63,7 @@ MonoBehaviour:
     Value: 
   EnableNpcEyeBlinking: 0
   EnableNpcLooting: 1
-  EnableDialogFreeMovement: 1
+  EnableDialogFreeMovement: 0
   ShowNpcColliders: 0
   ShowFreePoints: 0
   ShowWayPoints: 0

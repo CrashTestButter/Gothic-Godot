@@ -36,6 +36,9 @@ namespace Gothic.Core.Services.World
         private DateTime _time = new(1, 1, 1, 15, 0, 0);
         private Coroutine _timeTickCoroutineHandler;
 
+        // A shorter step forward (a script correcting the clock) is no jump: the NPCs stay where they are.
+        private static readonly TimeSpan _minTimeJump = TimeSpan.FromMinutes(5);
+
 
         public void Init()
         {
@@ -62,6 +65,7 @@ namespace Gothic.Core.Services.World
             if (_timeTickCoroutineHandler != null)
             {
                 _unityMonoService.StopCoroutine(_timeTickCoroutineHandler);
+                _timeTickCoroutineHandler = null;
             }
         }
 
@@ -152,16 +156,32 @@ namespace Gothic.Core.Services.World
             _minutesInHour = minute;
         }
 
-        public void SetTime(int hour, int minute)
+        /// <summary>
+        /// Returns whether the time jumped: forward by more than _minTimeJump while the clock runs, not while a world
+        /// loads (startup scripts). After a jump the NPCs go back to their routine (NpcService.ResetNpcsToRoutines).
+        /// The next game second raises the minute event for the minute set (and the hour event on a full hour), like
+        /// the engine's routines and timers see the new time at once. The counters kept from the old time made the
+        /// first event come up to a minute late - often only in the minute after the one set.
+        /// </summary>
+        public bool SetTime(int hour, int minute)
         {
             // From G2: Setzt die Uhrzeit auf hour:min. hour kann größer als 23 sein, um zum nächsten Tag zu springen.
             var daysToAdd = hour / 24;
             var normalizedHour = hour % 24;
 
-            _time = new DateTime(_time.Year, _time.Month, _time.Day, normalizedHour, minute, 0);
-            
-            if (daysToAdd > 0)
-                _time = _time.AddDays(daysToAdd);
+            var time = new DateTime(_time.Year, _time.Month, _time.Day, normalizedHour, minute, 0).AddDays(daysToAdd);
+
+            // Like the engine (OpenGothic World::setDayTime), a time earlier than now is tomorrow: sleeping until the
+            // morning starts a new day.
+            if (daysToAdd == 0 && time < _time)
+                time = time.AddDays(1);
+
+            var jump = time - _time;
+            _time = time;
+            _secondsInMinute = 59;
+            _minutesInHour = (minute + 59) % 60;
+
+            return _timeTickCoroutineHandler != null && jump > _minTimeJump;
         }
 
         public float GetSkyTime()
