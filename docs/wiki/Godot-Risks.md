@@ -33,7 +33,8 @@ How tied Gothic-Unity is to Unity today (split/14, 2026-11-06): 573 C# files (~8
 ### R4 - Engine calls from C# cost marshalling
 - Each Godot API call crosses from C# into C++. A zero-allocation API is only a proposal ([proposals#7842](https://github.com/godotengine/godot-proposals/issues/7842)); the PR "Optimize C# Interop" (godot#116305) is open.
 - Our own animation system writes bone poses: about 50 NPCs x ~60 bones = ~3000 calls per frame, as `Skeleton3D` has no bulk setter.
-- Status: **open**. Fix paths: bulk bone setter in a Godot fork (upstream it), GPU skinning from one bone texture, caching `StringName`s.
+- Measured on the desktop (CoreCLR): 150 humans, 8598 bone calls per frame, 1.2-1.5 ms (0.14-0.17 µs per call). See [[Work-Log]].
+- Status: **measured** (desktop), Quest still open. Fix paths: bulk bone setter in a Godot fork (upstream it), GPU skinning from one bone texture, caching `StringName`s.
 
 ### R5 - No Burst
 - `AnimationPoseJob` and `WorldMeshWriteJob` use Burst today. In Godot they become plain C# (System.Numerics / hardware intrinsics) or threads.
@@ -51,7 +52,7 @@ How tied Gothic-Unity is to Unity today (split/14, 2026-11-06): 573 C# files (~8
 
 ## Low
 
-- **Physics**: Jolt is the default 3D physics since 4.6. Layer matrix maps to 32 collision layers and masks. Status: **path**.
+- **Physics**: Jolt is the default 3D physics since 4.6. Layer matrix maps to 32 collision layers and masks. The merged Old Camp world (979k triangles) builds as Jolt trimeshes in about a second. Status: **path**.
 - **Video**: Godot core plays only Theora, but Gothic-Unity has its own Bink decoder in C#. Only the texture upload changes. Status: **path**.
 - **Native libraries**: ZenKit (`libzenkitcapi`) and dmusic exist for linux-x64 and android-arm64; P/Invoke packaging on Android needs a test. Status: **open**.
 - **DXT textures**: Quest GPUs don't sample DXT in either engine; Gothic-Unity decompresses or transcodes already. Check Godot's fallback. Status: **open**.

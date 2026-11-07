@@ -2,6 +2,28 @@
 
 Newest first.
 
+## 2026-11-07 - NPCs, mobs and fire
+
+![Gate guard](images/old-camp-gate-guard.png)
+![Guard on the palisade](images/old-camp-palisade-guard.png)
+![Hut fire at dusk](images/old-camp-hut-fire-dusk.png)
+![Shadow at a hut door](images/old-camp-hut-door.png)
+
+- **Humans**: HUMANS.MDH skeleton (34 bones) as a Skeleton3D, armours and bodies (.MDM soft skin) as skinned meshes with one Skin binding every node, heads (.MMB) on a BoneAttachment3D at "BIP01 HEAD", Gothic animations (.MAN: S_RUN, S_LGUARD, S_HGUARD, S_SIT) baked per frame and written bone by bone from C# every frame. Spawned at Old Camp waypoints, feet put on the ground by a ray.
+- Conversions that held: soft skin positions are the rest pose in model space (as in Gothic-Unity), bind poses from the hierarchy rest with the root at RootTranslation, animation rotations as `(x, y, -z, w)` of Gothic's stored quaternion (Gothic-Unity negates w; the z mirror flips x and y on top), root bone keeps only its height.
+- **Mobs** (.ASC and .MDS visuals: beds, chairs, benches, chests, doors, torch holders, cauldrons): mesh attachments at their hierarchy nodes in rest pose, merged into the world cells like the static objects. 8610 objects of 351 meshes, 11 not found.
+- **Particles**: torches, fires, smoke, coal glow from their C_ParticleFX instances in PARTICLEFX.DAT (450 emitters, all found), on GPUParticles3D in Gothic's units (cm to m, ms to s, velocity cm/ms x10, gravity cm/ms² x10000), animated textures as flipbook atlases, ADD/BLEND/MUL blending. Gothic-Unity scales emission and velocity by guessed factors; this maps the units directly.
+- **Collision**: the merged world as Jolt trimesh shapes (979k triangles) built in about a second, used for ground snapping and to frame screenshots.
+
+R4 measured (desktop, CoreCLR, one frame):
+
+| Humans | Bone calls | Time | Per call |
+|---|---|---|---|
+| 60 | 3450 | 0.79 ms | 0.23 µs |
+| 150 | 8598 | 1.2-1.5 ms | 0.14-0.17 µs |
+
+Two calls per bone (position, rotation). On the Quest (MonoVM, slower cores) expect several times more; the bulk paths in [[Godot-Risks]] R4 get measured there.
+
 ## 2026-11-07 - Old Camp renders in Godot
 
 First Gothic 1 world in Godot 4.7.2 (C#, Mobile renderer), desktop, rendered headless with gamescope.

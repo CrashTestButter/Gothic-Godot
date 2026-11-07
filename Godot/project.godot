@@ -26,3 +26,7 @@ openxr/enabled.android=true
 openxr/foveation_level=3
 openxr/foveation_dynamic=true
 shaders/enabled=true
+
+[physics]
+
+3d/physics_engine="Jolt Physics"

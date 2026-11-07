@@ -23,6 +23,8 @@ namespace GothicGodot.Spike
         private string[] _shots = Array.Empty<string>();
         private int _shotIndex = -1;
         private double _shotTime;
+        private bool _isShotPending;
+        private HumanCrowd _crowd;
 
         public override void _Ready()
         {
@@ -38,6 +40,9 @@ namespace GothicGodot.Spike
             foreach (var file in Directory.GetFiles(dataPath)
                          .Where(f => f.EndsWith(".vdf", StringComparison.OrdinalIgnoreCase)))
                 vfs.MountDisk(file, VfsOverwriteBehavior.Older);
+            var workPath = Path.Combine(_args.DataPath, "_work");
+            if (Directory.Exists(workPath))
+                vfs.Mount(Path.GetFullPath(workPath), "/_work", VfsOverwriteBehavior.Older);
             Log($"mounted {dataPath} in {watch.ElapsedMilliseconds} ms");
 
             var world = new ZenKit.World(vfs, _args.World, GameVersion.Gothic1);
@@ -74,13 +79,33 @@ namespace GothicGodot.Spike
                     $"{vobs.MeshCount} meshes, {vobs.MissingCount} missing");
             }
 
-            builder.CreateNodes(worldRoot, kind => materials[(int)kind]);
+            if (_args.Get("pfx", "true") == "true")
+                BuildParticles(vfs, world, watch);
+
+            var npcCount = _args.GetInt("npcs", 60);
+            if (npcCount > 0)
+            {
+                var humans = new HumanFactory(vfs, textures, materials[3], materials[4]);
+                var crowd = new HumanCrowd { Name = "Humans" };
+                AddChild(crowd);
+                _crowd = crowd;
+                crowd.Spawn(humans, world, npcCount, groundLight, _args.Get("bone-mode", "split"));
+                Log($"humans spawned in {watch.ElapsedMilliseconds} ms: {crowd.Count}");
+            }
+
+            var isCollisionEnabled = _args.Get("collision", "true") == "true";
+            builder.CreateNodes(worldRoot, kind => materials[(int)kind], isCollisionEnabled);
+            if (isCollisionEnabled)
+                Log($"collision: {builder.CollisionTriangleCount} triangles");
             Log($"world nodes created in {watch.ElapsedMilliseconds} ms: {builder.ChunkCount} chunks, " +
                 $"{builder.TriangleCount} triangles, {textures.LayerCount} texture layers, {textures.MissingCount} missing");
 
             var array = textures.Build();
             foreach (var material in materials)
+            {
                 material.SetShaderParameter("albedo_array", array);
+                material.SetShaderParameter("light_scale", _args.GetFloat("light", 1f));
+            }
             Log($"texture array {_args.SliceSize}px uploaded in {watch.ElapsedMilliseconds} ms");
 
             CreateEnvironment();
@@ -94,7 +119,7 @@ namespace GothicGodot.Spike
         public override void _Process(double delta)
         {
             _time += delta;
-            if (_shots.Length > 0)
+            if (_shots.Length > 0 && _time > 0.3)
             {
                 ProcessShots(delta);
                 return;
@@ -112,6 +137,27 @@ namespace GothicGodot.Spike
 
             if (_args.QuitAfterSeconds > 0 && _time > _args.QuitAfterSeconds)
                 GetTree().Quit();
+        }
+
+        private void BuildParticles(Vfs vfs, ZenKit.World world, Stopwatch watch)
+        {
+            var root = new Node3D { Name = "Particles" };
+            AddChild(root);
+            var pfx = new PfxBuilder(vfs);
+
+            void Walk(ZenKit.Vobs.IVirtualObject vob)
+            {
+                var visual = vob.Visual?.Name;
+                if (vob.ShowVisual && visual != null && visual.EndsWith(".PFX", StringComparison.OrdinalIgnoreCase))
+                    pfx.Add(visual, new Transform3D(VobBuilder.ToGodot(vob.Rotation), MeshPart.ToGodot(vob.Position)),
+                        root);
+                foreach (var child in vob.Children)
+                    Walk(child);
+            }
+
+            foreach (var vob in world.RootObjects)
+                Walk(vob);
+            Log($"particles built in {watch.ElapsedMilliseconds} ms: {pfx.EmitterCount} emitters, {pfx.MissingCount} missing");
         }
 
         /// <summary>
@@ -139,11 +185,100 @@ namespace GothicGodot.Spike
                 return;
             }
 
-            var parts = _shots[_shotIndex].Split('>');
-            _rig.GlobalPosition = ParseVector(parts[0]);
+            _isShotPending = true;
+        }
+
+        public override void _PhysicsProcess(double delta)
+        {
+            if (!_isShotPending)
+                return;
+            _isShotPending = false;
+
+            Vector3 position;
+            Vector3 target;
+            var shot = _shots[_shotIndex];
+            if (shot.StartsWith('#') && _crowd?.GetNpcTransform(shot[1..].Split(',')[0]) is { } npc)
+            {
+                // "#WAYPOINT[,distance]": in front of the human standing there, at eye height, looking at its face.
+                var parts = shot[1..].Split(',');
+                var distance = parts.Length > 1 ? float.Parse(parts[1], System.Globalization.CultureInfo.InvariantCulture) : 2.5f;
+                var forward = -npc.Basis.Z.Normalized();
+                target = npc.Origin + Vector3.Up * 1.5f;
+                position = npc.Origin + forward * distance + Vector3.Up * 1.65f + npc.Basis.X.Normalized() * (distance * 0.35f);
+            }
+            else if (shot.StartsWith('@'))
+            {
+                // "@x,y,z" or "@x,y,z,distance": find a free spot with ground and a clear view of the target.
+                var values = shot[1..].Split(',').Select(v => float.Parse(v, System.Globalization.CultureInfo.InvariantCulture)).ToArray();
+                target = new Vector3(values[0], values[1], values[2]);
+                position = FindViewpoint(target, values.Length > 3 ? values[3] : 5f) ?? target + new Vector3(4, 2, 4);
+            }
+            else
+            {
+                var parts = shot.Split('>');
+                position = ParseVector(parts[0]);
+                target = ParseVector(parts[1]);
+            }
+
+            _rig.GlobalPosition = position;
             _rig.Rotation = Vector3.Zero;
             _camera.Position = Vector3.Zero;
-            _camera.LookAt(ParseVector(parts[1]));
+            _camera.LookAt(target);
+            Log($"shot {_shotIndex + 1} camera {position} -> {target}");
+        }
+
+        private Vector3? FindViewpoint(Vector3 target, float preferredDistance)
+        {
+            var space = GetWorld3D().DirectSpaceState;
+            Vector3? best = null;
+            var bestScore = float.MaxValue;
+
+            foreach (var distance in new[] { preferredDistance, preferredDistance * 1.5f, preferredDistance * 0.7f, preferredDistance * 2.2f })
+            for (var step = 0; step < 24; step++)
+            {
+                var angle = Mathf.Tau * step / 24f;
+                var probe = target + new Vector3(Mathf.Cos(angle) * distance, 0, Mathf.Sin(angle) * distance);
+                var down = Ray(space, probe + Vector3.Up * 6f, probe + Vector3.Down * 12f);
+                if (down == null)
+                    continue;
+
+                var eye = down.Value + Vector3.Up * 1.7f;
+                if (eye.Y < target.Y - 3f || eye.Y > target.Y + 6f)
+                    continue;
+
+                // Not inside or right next to geometry.
+                var isClear = true;
+                foreach (var direction in new[] { Vector3.Left, Vector3.Right, Vector3.Forward, Vector3.Back, Vector3.Up })
+                {
+                    if (Ray(space, eye, eye + direction * 0.5f) != null)
+                    {
+                        isClear = false;
+                        break;
+                    }
+                }
+                if (!isClear)
+                    continue;
+
+                var view = Ray(space, eye, target);
+                if (view != null && view.Value.DistanceTo(target) > 1.0f)
+                    continue;
+
+                // Prefer the wanted distance and a little height above the target.
+                var score = Mathf.Abs(eye.DistanceTo(target) - preferredDistance) + Mathf.Abs(eye.Y - target.Y - 1f);
+                if (score < bestScore)
+                {
+                    bestScore = score;
+                    best = eye;
+                }
+            }
+
+            return best;
+        }
+
+        private static Vector3? Ray(PhysicsDirectSpaceState3D space, Vector3 from, Vector3 to)
+        {
+            var hit = space.IntersectRay(PhysicsRayQueryParameters3D.Create(from, to));
+            return hit.Count > 0 ? (Vector3)hit["position"] : null;
         }
 
         private static Vector3 ParseVector(string text)
@@ -155,7 +290,14 @@ namespace GothicGodot.Spike
 
         private void CreateEnvironment()
         {
-            var sky = new ProceduralSkyMaterial
+            var dusk = _args.Get("dusk", "false") == "true";
+            var sky = dusk ? new ProceduralSkyMaterial
+            {
+                SkyTopColor = new Color(0.08f, 0.1f, 0.2f),
+                SkyHorizonColor = new Color(0.45f, 0.3f, 0.25f),
+                GroundHorizonColor = new Color(0.2f, 0.17f, 0.15f),
+                GroundBottomColor = new Color(0.05f, 0.05f, 0.05f)
+            } : new ProceduralSkyMaterial
             {
                 SkyTopColor = new Color(0.32f, 0.45f, 0.62f),
                 SkyHorizonColor = new Color(0.68f, 0.72f, 0.74f),
@@ -167,7 +309,7 @@ namespace GothicGodot.Spike
                 BackgroundMode = Godot.Environment.BGMode.Sky,
                 Sky = new Sky { SkyMaterial = sky },
                 FogEnabled = true,
-                FogLightColor = new Color(0.62f, 0.66f, 0.7f),
+                FogLightColor = dusk ? new Color(0.25f, 0.2f, 0.2f) : new Color(0.62f, 0.66f, 0.7f),
                 FogDensity = _args.GetFloat("fog", 0.0005f),
                 FogSkyAffect = 0.3f,
                 TonemapMode = Godot.Environment.ToneMapper.Linear

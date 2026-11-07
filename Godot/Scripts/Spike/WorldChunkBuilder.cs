@@ -156,8 +156,17 @@ namespace GothicGodot.Spike
                 chunk.Indices.Add(start + index);
         }
 
-        public void CreateNodes(Node3D parent, Func<Kind, Material> getMaterial)
+        public int CollisionTriangleCount { get; private set; }
+
+        public void CreateNodes(Node3D parent, Func<Kind, Material> getMaterial, bool isCollisionEnabled = false)
         {
+            StaticBody3D body = null;
+            if (isCollisionEnabled)
+            {
+                body = new StaticBody3D { Name = "WorldCollision" };
+                parent.AddChild(body);
+            }
+
             foreach (var ((x, z, kind), chunk) in _chunks)
             {
                 var arrays = new Godot.Collections.Array();
@@ -179,6 +188,17 @@ namespace GothicGodot.Spike
                     Mesh = arrayMesh,
                     CastShadow = GeometryInstance3D.ShadowCastingSetting.Off
                 });
+
+                if (body != null && kind != Kind.Water)
+                {
+                    var faces = new Vector3[chunk.Indices.Count];
+                    for (var i = 0; i < faces.Length; i++)
+                        faces[i] = chunk.Positions[chunk.Indices[i]];
+                    var shape = new ConcavePolygonShape3D { BackfaceCollision = true };
+                    shape.SetFaces(faces);
+                    body.AddChild(new CollisionShape3D { Shape = shape });
+                    CollisionTriangleCount += faces.Length / 3;
+                }
 
                 ChunkCount++;
                 TriangleCount += chunk.Indices.Count / 3;
