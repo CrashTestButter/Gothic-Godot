@@ -127,6 +127,12 @@ namespace GothicGodot.Spike
         /// <summary>In a dialog with the hero: AI and routine wait, the dialog plays the animations.</summary>
         public bool IsInDialog;
 
+        /// <summary>Unconscious or dead after the hero's hits.</summary>
+        public bool IsDown;
+        public bool IsDead;
+        public double LastHitTime = -10;
+        public Area3D Hitbox;
+
         public Vector3 Position => Root.GlobalPosition;
     }
 }

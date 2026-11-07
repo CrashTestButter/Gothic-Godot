@@ -2,6 +2,16 @@
 
 Newest first.
 
+## 2026-11-07 - Fighting, part 1: the hero hits
+
+![A guard knocked out next to the castle grate](images/fight-guard-down.png)
+
+- NPCs and monsters get a hitbox (their body's box, an area on its own physics layer). A melee weapon (ITEM_KAT_NF) in the hand hits when its blade passes through a hitbox faster than 2 m/s (XR); on the desktop a left click hits the NPC in front within 2.5 m. A swing counts once per NPC (0.5 s).
+- Damage with Gothic-Unity's rules (from OpenGothic): per damage type of the weapon strength + damage - protection; G1's critical hit (the weapon talent's value as chance) doubles the weapon's part, G2's hit chance decides between a hit and a near miss (a tenth); at least NPC_MINIMAL_DAMAGE, nothing for NPC_FLAG_IMMORTAL.
+- The victim perceives the damage (its PERC_ASSESSDAMAGE function with other = the hero): G1's guard Cutter went into ZS_AssessEnemy at the first hit. At no hit points humans go down unconscious (ZS_Unconscious, 1 HP, get up when the state ends), monsters die (ZS_Dead, other = the killer); the dead lie still.
+- `--fight-test=true`: a sword from the bag into the hand, swings at the nearest human with 100 HP or less (G2's starting hero mostly near-misses against guards). First run against the guard Cutter (280 HP): 30 damage a hit, unconscious after 10 swings; the test's G1 target now is Snaf (100 HP, 4 swings), G2 Gritta (5 HP, one swing with a heavy branch). Both suites (`tools/run-tests.sh 1` and `2`, 8 tests each) pass.
+- Not in it yet (part 2): NPCs fighting back (the fight AI, AI_Attack and its moves), the hero's hit points going down, blocking, hit sounds and blood, ranged weapons and magic, experience.
+
 ## 2026-11-07 - Time of day
 
 ![The Old Camp at 19:00](images/time-1900.png)

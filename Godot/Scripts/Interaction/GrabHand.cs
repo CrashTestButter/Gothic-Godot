@@ -33,6 +33,9 @@ namespace GothicGodot.Interaction
 
         public WorldItem Held { get; private set; }
 
+        /// <summary>The hand's speed, averaged over the last physics frames (a swing, a throw).</summary>
+        public Vector3 Velocity => Average(_velocities);
+
         /// <summary>For tests: grip held or not, instead of the input.</summary>
         public bool? ForcedGrip;
 

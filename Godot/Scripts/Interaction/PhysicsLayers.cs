@@ -12,6 +12,9 @@ namespace GothicGodot.Interaction
         /// <summary>The player's body.</summary>
         public const uint Player = 1 << 1;
 
+        /// <summary>NPCs' hitboxes (areas) for the hero's weapon.</summary>
+        public const uint Npcs = 1 << 4;
+
         /// <summary>Items the hands can take; they land on the world, the player walks through them.</summary>
         public const uint Items = 1 << 3;
     }

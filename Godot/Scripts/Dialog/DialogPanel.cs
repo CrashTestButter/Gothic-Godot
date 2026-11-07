@@ -263,7 +263,7 @@ namespace GothicGodot.Dialog
             var bestDistance = _talkDistance;
             foreach (var npc in _ai.Npcs)
             {
-                if (npc.Root == null || !npc.Root.Visible || !_dialog.HasInfos(npc))
+                if (npc.Root == null || !npc.Root.Visible || npc.IsDown || !_dialog.HasInfos(npc))
                     continue;
                 var toNpc = npc.Position + Vector3.Up * 1.5f - head;
                 toNpc.Y = 0;

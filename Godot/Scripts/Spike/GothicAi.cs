@@ -30,6 +30,11 @@ namespace GothicGodot.Spike
         private readonly List<GothicNpc> _npcs = new();
         private readonly Dictionary<int, GothicNpc> _npcBySymbol = new();
         private readonly List<GothicNpc> _inserted = new();
+        private readonly Dictionary<Area3D, GothicNpc> _npcByHitbox = new();
+
+        /// <summary>The NPC a physics query hit (its hitbox area).</summary>
+        public GothicNpc NpcOf(GodotObject collider) =>
+            collider is Area3D area && _npcByHitbox.TryGetValue(area, out var npc) ? npc : null;
         private readonly Dictionary<string, Vector3> _waypoints = new(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, List<string>> _waynet = new(StringComparer.OrdinalIgnoreCase);
         private readonly Random _random = new(3);
@@ -59,6 +64,9 @@ namespace GothicGodot.Spike
         public int Count => _npcs.Count;
         public IReadOnlyList<GothicNpc> Npcs => _npcs;
         public DaedalusVm Vm => _vm;
+        public ModelFactory HumanFactory => _factory;
+        public GothicFight Fight { get; private set; }
+        public double Time => _time;
 
         /// <summary>The scripts' sounds (Snd_Play, Snd_Play3d) play here once it is set.</summary>
         public Audio.GothicSfx Sfx { get; set; }
@@ -128,6 +136,8 @@ namespace GothicGodot.Spike
             }
 
             Dialog = new GothicDialog(_vm, vfs, this, dataPath);
+            // G2's scripts have ITPO_HEALTH_01 (G1: ItFo_Potion_Health_01): the game decides the damage rules.
+            Fight = new GothicFight(this, _vm, _vm.GetSymbolByName("ITPO_HEALTH_01") != null);
             GD.Print($"[Dialog] {Dialog.InfoCount} infos, subtitles {(Dialog.HasSubtitles ? "OU.BIN" : "missing")}");
 
             if (_leftOut.Count > 0)
@@ -304,6 +314,20 @@ namespace GothicGodot.Spike
                 headInstance.SetInstanceShaderParameter("tint", tint);
             }
 
+            // The hitbox for the hero's weapon: the body's box in its rest pose.
+            var bounds = body.GetAabb();
+            npc.Hitbox = new Area3D
+            {
+                Name = "Hitbox", CollisionLayer = Interaction.PhysicsLayers.Npcs, CollisionMask = 0, Monitoring = false
+            };
+            npc.Hitbox.AddChild(new CollisionShape3D
+            {
+                Shape = new BoxShape3D { Size = bounds.Size * new Vector3(0.8f, 1f, 0.8f) }, Position = bounds.GetCenter()
+            });
+            npc.Root.AddChild(npc.Hitbox);
+            npc.Hitbox.SetMeta("npc", npc.SymbolName);
+            _npcByHitbox[npc.Hitbox] = npc;
+
             PlayClip(npc, npc.IdleClip, true);
             npc.NextPerceptionTime = _random.NextDouble() * 2.0;
             _npcs.Add(npc);
@@ -405,6 +429,9 @@ namespace GothicGodot.Spike
 
         private void Tick(GothicNpc npc, double delta)
         {
+            // The dead lie still; their ZS_Dead ran when they died.
+            if (npc.IsDead)
+                return;
             // Active perceptions on the perception timer: the hero is the one the camp reacts to.
             if (_time >= npc.NextPerceptionTime)
             {
@@ -511,6 +538,13 @@ namespace GothicGodot.Spike
             npc.RoutineIndex = active;
             if (active >= 0)
                 entry = npc.Routine[active];
+
+            // Back to the routine: an unconscious NPC got up.
+            if (npc.IsDown && !npc.IsDead)
+            {
+                npc.IsDown = false;
+                PlayClip(npc, npc.IdleClip, true);
+            }
 
             if (entry.State == 0 && npc.Routine.Count > 0)
                 entry = npc.Routine[0];
@@ -917,6 +951,22 @@ namespace GothicGodot.Spike
         }
 
         public bool HasClip(string name) => _factory.GetClip(name.ToUpperInvariant()) != null;
+
+        public bool HasClip(GothicNpc npc, string name) => (npc.Factory ?? _factory).GetClip(name.ToUpperInvariant()) != null;
+
+        /// <summary>A script reaction now (a perception's function), self = the NPC, other = whom it reacts to.</summary>
+        public void RunState(GothicNpc npc, int function, NpcInstance other) => CallState(npc, function, other);
+
+        /// <summary>The engine starts a state at once (ZS_Unconscious, ZS_Dead): the queue is dropped, main runs next.</summary>
+        public void StartStateNow(GothicNpc npc, int state, NpcInstance other)
+        {
+            npc.Actions.Clear();
+            npc.Current = null;
+            SetState(npc, state);
+            CallState(npc, state, other);
+            npc.State = GothicNpc.LoopState.Loop;
+            npc.NextLoopTime = 0;
+        }
 
         public bool PlayClip(GothicNpc npc, string name, bool isLooping)
         {
