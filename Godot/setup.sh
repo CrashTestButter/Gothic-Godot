@@ -28,4 +28,19 @@ if [ ! -d addons/godotopenxrvendors ]; then
     unzip -q "$CACHE/vendors.zip" -d "$CACHE/vendors"
     cp -r "$CACHE/vendors/asset/addons/godotopenxrvendors" addons/
 fi
+# ZenKitCS with our patches (forks/ZenKitCS/*.patch): external calls without garbage. Needs dotnet.
+ZENKITCS_REF="${ZENKITCS_REF:-e370d5ea9409ad82d140223eca33ff6bccbf5c59}"
+if [ "${USE_ZENKITCS_FORK:-1}" = 1 ] && command -v dotnet >/dev/null; then
+    if [ ! -d "$CACHE/ZenKitCS" ]; then
+        git clone -q https://github.com/GothicKit/ZenKitCS.git "$CACHE/ZenKitCS"
+    fi
+    git -C "$CACHE/ZenKitCS" checkout -q -f "$ZENKITCS_REF"
+    for patch in ../forks/ZenKitCS/*.patch; do
+        git -C "$CACHE/ZenKitCS" apply "$(realpath "$patch")"
+    done
+    dotnet build -c Release -nologo -v q "$CACHE/ZenKitCS/ZenKit/ZenKit.csproj"
+    cp lib/ZenKit.dll lib/ZenKit.upstream.dll
+    cp "$CACHE"/ZenKitCS/ZenKit/bin/Release/netstandard2.1/*/ZenKit.dll lib/ZenKit.dll
+    git -C "$CACHE/ZenKitCS" checkout -q -f "$ZENKITCS_REF"
+fi
 echo "Done: lib/ and addons/godotopenxrvendors/"

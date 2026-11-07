@@ -2,6 +2,15 @@
 
 Newest first.
 
+## 2026-11-07 - Frame spikes: garbage from ZenKit's external calls
+
+- With the GPU at 71-74% at 120 Hz, 6-8 frames per second still missed. Logging what long frames had in common: 2-16 ms of AI time in a single script call.
+- Those calls were garbage collections (gen0 and gen1) every 1-4 s: 2.5-5.5 ms on the desktop, 10-16 ms on the Quest's MonoVM. Two causes:
+  - The heap still held ~1.2 GB of loading garbage (the cached ZenKit world mesh and builder data), which makes every collection slower. Fix: one full, compacting collection right after loading (1224 MB -> 14 MB).
+  - ZenKitCS allocates ~430 bytes per external call (new VM and symbol wrappers, a finalizable instance wrapper per instance parameter, boxing): ~1.5 MB/s with 134 NPCs. Fix: a small ZenKitCS patch, see [[Upstream-Forks]]. Allocations inside script calls ~1500 -> ~10 KB/s, no collections in a 25 s run.
+- Quest 3, 120 Hz, 134 scripted NPCs, objects 80 m, particles 40 m, animation culling, occlusion culling, MSAA 2x: **119.1 FPS average (minimum 111), stale frames 3.8 per second, no garbage collection**.
+- What is left: 1-3 long frames per second from the spike's own path search when an NPC starts walking (breadth-first search over the whole waynet, nearest waypoint by scanning all of them) - spike code, not ZenKit or Godot.
+
 ## 2026-11-07 - Where the Quest 3 stands at 120 Hz
 
 Old Camp, 134 scripted NPCs (routines, AI states), objects to 80 m, particles to 40 m:

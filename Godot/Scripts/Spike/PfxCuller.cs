@@ -36,6 +36,7 @@ namespace GothicGodot.Spike
             if (camera == null)
                 return;
 
+            FrameEvents.IsPfxCulled = true;
             var eye = camera.GlobalPosition;
             foreach (var emitter in _emitters)
             {

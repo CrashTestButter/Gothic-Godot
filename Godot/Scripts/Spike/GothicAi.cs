@@ -49,6 +49,10 @@ namespace GothicGodot.Spike
         private int _frames;
         private double _logTime;
         private readonly Dictionary<string, int> _missingAnis = new();
+        private int _slowCallsLogged;
+        private readonly Dictionary<string, long> _allocatedByState = new();
+        private long _allocatedInCalls;
+        private long _allocatedAtLastLog;
 
         public int Count => _npcs.Count;
 
@@ -97,6 +101,7 @@ namespace GothicGodot.Spike
                 Spawn(instance, waypoint);
             }
 
+            _world = null;
             GD.Print($"[Ai] startup inserted {_spawns.Count} NPCs, {_npcs.Count} within {radius} m spawned at " +
                      $"{hour:00}:00, routines {_npcs.Sum(n => n.Routine.Count)} entries");
         }
@@ -219,7 +224,10 @@ namespace GothicGodot.Spike
                 _animated++;
             }
 
-            _boneMs += _frameWatch.Elapsed.TotalMilliseconds;
+            var animationMs = _frameWatch.Elapsed.TotalMilliseconds;
+            FrameEvents.AiMs += aiMs;
+            FrameEvents.AnimationMs += animationMs;
+            _boneMs += animationMs;
             _animatedSum += AnimationFar > 0 ? _animated : _npcs.Count;
             _aiMs += aiMs;
             _vmMs += _vmWatch.Elapsed.TotalMilliseconds - vmBefore;
@@ -234,6 +242,13 @@ namespace GothicGodot.Spike
                      $"animation {_boneMs / _frames:F2} ms ({_animatedSum / _frames} animated); per second " +
                      $"{_loops} state loops, {_perceptions} perceptions, {_externals + _defaultExternals} externals " +
                      $"({_defaultExternals} default)");
+            var allocatedTotal = GC.GetAllocatedBytesForCurrentThread();
+            GD.Print($"[Ai] allocated per second: {(allocatedTotal - _allocatedAtLastLog) / 1024} KB on the main thread, " +
+                     $"{_allocatedInCalls / 1024} KB inside script calls; top: " + string.Join(", ",
+                         _allocatedByState.OrderByDescending(a => a.Value).Take(4).Select(a => $"{a.Key} {a.Value / 1024} KB")));
+            _allocatedAtLastLog = allocatedTotal;
+            _allocatedInCalls = 0;
+            _allocatedByState.Clear();
             if (_missingAnis.Count > 0 && _time < 12)
                 GD.Print("[Ai] animations not found: " + string.Join(", ",
                     _missingAnis.OrderByDescending(m => m.Value).Take(12).Select(m => $"{m.Key} x{m.Value}")));
@@ -293,6 +308,7 @@ namespace GothicGodot.Spike
                         return;
                     npc.NextLoopTime = _time + npc.PerceptionTime;
                     _loops++;
+                    FrameEvents.StateLoops++;
                     if (CallState(npc, npc.StateLoop) != _loopContinue)
                         npc.State = GothicNpc.LoopState.End;
                     break;
@@ -309,7 +325,16 @@ namespace GothicGodot.Spike
 
         private void StartRoutine(GothicNpc npc)
         {
-            var entry = npc.Routine.FirstOrDefault(r => IsActive(r, _minuteOfDay));
+            var entry = default(GothicNpc.RoutineEntry);
+            foreach (var candidate in npc.Routine)
+            {
+                if (IsActive(candidate, _minuteOfDay))
+                {
+                    entry = candidate;
+                    break;
+                }
+            }
+
             if (entry.State == 0 && npc.Routine.Count > 0)
                 entry = npc.Routine[0];
             if (entry.State == 0)
@@ -322,12 +347,21 @@ namespace GothicGodot.Spike
             SetState(npc, entry.State);
         }
 
+        private readonly Dictionary<int, (int Loop, int End)> _stateFunctions = new();
+
         private void SetState(GothicNpc npc, int state)
         {
-            var symbol = _vm.GetSymbolByIndex(state);
+            if (!_stateFunctions.TryGetValue(state, out var functions))
+            {
+                var symbol = _vm.GetSymbolByIndex(state);
+                functions = (_vm.GetSymbolByName($"{symbol.Name}_LOOP")?.Index ?? 0,
+                    _vm.GetSymbolByName($"{symbol.Name}_END")?.Index ?? 0);
+                _stateFunctions[state] = functions;
+            }
+
             npc.StateMain = state;
-            npc.StateLoop = _vm.GetSymbolByName($"{symbol.Name}_LOOP")?.Index ?? 0;
-            npc.StateEnd = _vm.GetSymbolByName($"{symbol.Name}_END")?.Index ?? 0;
+            npc.StateLoop = functions.Loop;
+            npc.StateEnd = functions.End;
             npc.StateTime = 0;
             npc.State = GothicNpc.LoopState.Start;
         }
@@ -342,14 +376,40 @@ namespace GothicGodot.Spike
             _vm.GlobalSelf = npc.Instance;
             _vm.GlobalOther = other ?? _hero.Instance;
             var result = 0;
-            Measure(() =>
+            var before = _vmWatch.Elapsed.TotalMilliseconds;
+            var externalsBefore = _externals + _defaultExternals;
+            var gcBefore = GC.CollectionCount(0);
+            var allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+            var symbol = _vm.GetSymbolByIndex(function);
+            _vmWatch.Start();
+            try
             {
-                var symbol = _vm.GetSymbolByIndex(function);
                 if (symbol.HasReturn)
                     result = _vm.Call<int>(function);
                 else
                     _vm.Call(function);
-            });
+            }
+            catch (Exception e)
+            {
+                GD.PushWarning($"[Ai] script call failed: {e.Message}");
+            }
+            finally
+            {
+                _vmWatch.Stop();
+            }
+
+            var callMs = _vmWatch.Elapsed.TotalMilliseconds - before;
+            var allocated = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+            _allocatedByState[symbol.Name] = _allocatedByState.GetValueOrDefault(symbol.Name) + allocated;
+            _allocatedInCalls += allocated;
+            if (callMs > 2.0 && _slowCallsLogged < 200)
+            {
+                _slowCallsLogged++;
+                GD.Print($"[Ai] slow call at {_time:F1} s {symbol.Name} on {npc.Name}: {callMs:F2} ms, " +
+                         $"{_externals + _defaultExternals - externalsBefore} externals, " +
+                         $"{GC.CollectionCount(0) - gcBefore} garbage collections during the call");
+            }
+
             return result;
         }
 

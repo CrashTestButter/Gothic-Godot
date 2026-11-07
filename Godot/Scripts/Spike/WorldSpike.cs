@@ -145,6 +145,12 @@ namespace GothicGodot.Spike
             CreateEnvironment();
             CreateRig(isXr, GetCameraStart(world));
 
+            // Loading leaves the cached ZenKit world and the builders' data as garbage (over 1 GB). Collect and
+            // compact it now: a big heap makes every later collection slower (frame spikes on the Quest).
+            // Deferred: inside _Ready the locals (world, mesh) still keep it alive.
+            if (_args.Get("collect", "true") == "true")
+                Callable.From(CollectLoadingGarbage).CallDeferred();
+
             var shots = _args.Get("shots", "");
             if (!string.IsNullOrEmpty(shots))
                 _shots = shots.Split(';', StringSplitOptions.RemoveEmptyEntries);
@@ -353,6 +359,16 @@ namespace GothicGodot.Spike
                 TonemapMode = Godot.Environment.ToneMapper.Linear
             };
             AddChild(new WorldEnvironment { Environment = environment });
+        }
+
+        private static void CollectLoadingGarbage()
+        {
+            var before = GC.GetTotalMemory(false);
+            System.Runtime.GCSettings.LargeObjectHeapCompactionMode = System.Runtime.GCLargeObjectHeapCompactionMode.CompactOnce;
+            GC.Collect(2, GCCollectionMode.Forced, true, true);
+            GC.WaitForPendingFinalizers();
+            GC.Collect(2, GCCollectionMode.Forced, true, true);
+            Log($"after loading: managed heap {before / 1048576} MB -> {GC.GetTotalMemory(true) / 1048576} MB");
         }
 
         private bool TryStartXr()

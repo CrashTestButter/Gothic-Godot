@@ -23,6 +23,14 @@ namespace GothicGodot.Spike
         private double _renderGpuMs;
         private double _setupCpuMs;
         private double _processMs;
+        private int _longFrames;
+        private int _longWithGc;
+        private int _longWithLoops;
+        private int _longWithPfx;
+        private int _longWithAi;
+        private double _longAiMs;
+        private double _longAnimationMs;
+        private int _lastGen0;
 
         public override void _Ready()
         {
@@ -40,6 +48,27 @@ namespace GothicGodot.Spike
             var frameMs = _frameWatch.Elapsed.TotalMilliseconds;
             _frameWatch.Restart();
             _maxFrameMs = Math.Max(_maxFrameMs, frameMs);
+
+            // A frame longer than 1.5 refresh intervals missed its slot: what did it have?
+            var target = 1000.0 / Math.Max(60.0, Engine.GetFramesPerSecond() > 100 ? 120.0 : Engine.GetFramesPerSecond() > 80 ? 90.0 : 72.0);
+            var gen0Now = GC.CollectionCount(0);
+            if (frameMs > target * 1.5)
+            {
+                _longFrames++;
+                if (gen0Now != _lastGen0)
+                    _longWithGc++;
+                if (FrameEvents.StateLoops > 0)
+                    _longWithLoops++;
+                if (FrameEvents.IsPfxCulled)
+                    _longWithPfx++;
+                if (FrameEvents.AiMs + FrameEvents.AnimationMs > 2.0)
+                    _longWithAi++;
+                _longAiMs += FrameEvents.AiMs;
+                _longAnimationMs += FrameEvents.AnimationMs;
+            }
+
+            _lastGen0 = gen0Now;
+            FrameEvents.Clear();
             var viewport = GetViewport().GetViewportRid();
             _renderCpuMs += RenderingServer.ViewportGetMeasuredRenderTimeCpu(viewport);
             _renderGpuMs += RenderingServer.ViewportGetMeasuredRenderTimeGpu(viewport);
@@ -63,8 +92,13 @@ namespace GothicGodot.Spike
                      $" gc {gen0 - _gen0}/{gen1 - _gen1}/{gen2 - _gen2} pause {(gcPause - _gcPause).TotalMilliseconds:F2} ms" +
                      $" managed {GC.GetTotalMemory(false) / 1048576} MB static {OS.GetStaticMemoryUsage() / 1048576} MB" +
                      $" | render cpu {_renderCpuMs / _frames:F2} gpu {_renderGpuMs / _frames:F2} setup {_setupCpuMs / _frames:F2}" +
-                     $" process avg {_processMs / _frames:F2} ms");
+                     $" process avg {_processMs / _frames:F2} ms" +
+                     $" | long {_longFrames} (gc {_longWithGc}, state loops {_longWithLoops}, pfx culler {_longWithPfx}," +
+                     $" ai+anim>2ms {_longWithAi}, avg ai {(_longFrames > 0 ? _longAiMs / _longFrames : 0):F2}" +
+                     $" anim {(_longFrames > 0 ? _longAnimationMs / _longFrames : 0):F2} ms)");
             _renderCpuMs = _renderGpuMs = _setupCpuMs = _processMs = 0;
+            _longFrames = _longWithGc = _longWithLoops = _longWithPfx = _longWithAi = 0;
+            _longAiMs = _longAnimationMs = 0;
 
             _gen0 = gen0;
             _gen1 = gen1;
